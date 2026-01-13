@@ -1,10 +1,15 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include <time.h>
+
+#include "app_state.h"
+#include "config.h"
+#include "report.h"
+#include "web_ui.h"
+#include "secrets.h"
 
 #define FLOW_SENSOR_PIN 22
 #define VALVE_PIN 23
-
-// Start with something plausible, then calibrate with real water
-#define PULSES_PER_LITER 450.0f
 
 volatile uint32_t pulseCount = 0;
 volatile uint32_t lastPulseMicros = 0;
@@ -13,9 +18,24 @@ volatile uint32_t lastPulseMicros = 0;
 static const uint32_t MIN_PULSE_US = 300;
 
 uint32_t lastCalcMs = 0;
+uint32_t lastReportMs = 0;
 float flowRateLpm = 0.0f;
 float totalLiters = 0.0f;
+float dailyLiters = 0.0f;
 bool valveState = false;
+
+static const char *NTP_SERVER_1 = "pool.ntp.org";
+static const char *NTP_SERVER_2 = "time.nist.gov";
+
+DayUsage weekUsage[7];
+int weekIndex = 6;
+int currentYear = -1;
+int currentYday = -1;
+bool timeValid = false;
+bool flowActive = false;
+int activeIntervalIndex = -1;
+
+Config config;
 
 void IRAM_ATTR pulseCounter() {
   uint32_t now = micros();
@@ -26,13 +46,13 @@ void IRAM_ATTR pulseCounter() {
 }
 
 void openValve() {
-  digitalWrite(VALVE_PIN, HIGH);
+  digitalWrite(VALVE_PIN, LOW);
   valveState = true;
   Serial.println(">>> VALVE OPENED <<<");
 }
 
 void closeValve() {
-  digitalWrite(VALVE_PIN, LOW);
+  digitalWrite(VALVE_PIN, HIGH);
   valveState = false;
   Serial.println(">>> VALVE CLOSED <<<");
 }
@@ -59,21 +79,160 @@ void printStatus() {
   Serial.println("====================\n");
 }
 
+void resetDayUsage(int idx, int year, int month, int day, int wday) {
+  weekUsage[idx].year = year;
+  weekUsage[idx].month = month;
+  weekUsage[idx].day = day;
+  weekUsage[idx].wday = wday;
+  weekUsage[idx].totalSeconds = 0;
+  weekUsage[idx].totalLiters = 0.0f;
+  weekUsage[idx].intervalCount = 0;
+  for (int i = 0; i < MAX_INTERVALS; i++) {
+    weekUsage[idx].intervals[i].startSec = 0;
+    weekUsage[idx].intervals[i].endSec = 0;
+    weekUsage[idx].intervals[i].liters = 0.0f;
+  }
+}
+
+bool isTimeSane() {
+  time_t now = time(nullptr);
+  return now >= 1609459200;
+}
+
+bool isWithinClosedWindow(int hour, int minute) {
+  int startMin = (config.closeStartHour * 60) + config.closeStartMin;
+  int endMin = (config.closeEndHour * 60) + config.closeEndMin;
+  int nowMin = (hour * 60) + minute;
+  if (startMin == endMin) {
+    return false;
+  }
+  if (startMin < endMin) {
+    return (nowMin >= startMin) && (nowMin < endMin);
+  }
+  return (nowMin >= startMin) || (nowMin < endMin);
+}
+
+void startInterval(DayUsage &day, int secOfDay) {
+  if (day.intervalCount >= MAX_INTERVALS) {
+    activeIntervalIndex = -1;
+    return;
+  }
+  activeIntervalIndex = day.intervalCount;
+  day.intervals[activeIntervalIndex].startSec = secOfDay;
+  day.intervals[activeIntervalIndex].endSec = secOfDay;
+  day.intervals[activeIntervalIndex].liters = 0.0f;
+  day.intervalCount++;
+}
+
+void updateIntervalEnd(DayUsage &day, int secOfDay) {
+  if (activeIntervalIndex < 0) {
+    return;
+  }
+  day.intervals[activeIntervalIndex].endSec = secOfDay;
+}
+
+void closeInterval(DayUsage &day, int secOfDay) {
+  if (activeIntervalIndex >= 0) {
+    day.intervals[activeIntervalIndex].endSec = secOfDay;
+  }
+  activeIntervalIndex = -1;
+}
+
+void ensureDaySlot(struct tm &tmNow) {
+  // Roll daily buckets and keep intervals contiguous across midnight.
+  if (tmNow.tm_year == currentYear && tmNow.tm_yday == currentYday) {
+    return;
+  }
+
+  int prevIndex = weekIndex;
+  if (flowActive && prevIndex >= 0) {
+    closeInterval(weekUsage[prevIndex], 86399);
+  }
+
+  weekIndex = (weekIndex + 1) % 7;
+  resetDayUsage(weekIndex, tmNow.tm_year + 1900, tmNow.tm_mon + 1, tmNow.tm_mday, tmNow.tm_wday);
+  currentYear = tmNow.tm_year;
+  currentYday = tmNow.tm_yday;
+  dailyLiters = 0.0f;
+
+  if (flowActive) {
+    startInterval(weekUsage[weekIndex], 0);
+  }
+}
+
+bool getLocalTimeSafe(struct tm &tmNow) {
+  if (!timeValid) {
+    return false;
+  }
+  time_t now = time(nullptr);
+  localtime_r(&now, &tmNow);
+  return true;
+}
+
+void connectWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  uint32_t startMs = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - startMs) < 15000) {
+    delay(250);
+  }
+}
+
+void syncTime() {
+  setenv("TZ", config.tzInfo, 1);
+  tzset();
+  configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+
+  uint32_t startMs = millis();
+  while (!isTimeSane() && (millis() - startMs) < 15000) {
+    delay(250);
+  }
+  timeValid = isTimeSane();
+}
+
 void setup() {
   Serial.begin(115200);
 
   pinMode(FLOW_SENSOR_PIN, INPUT);     // if you have external pull-up, INPUT is fine
   pinMode(VALVE_PIN, OUTPUT);
-  digitalWrite(VALVE_PIN, LOW);
+  digitalWrite(VALVE_PIN, HIGH);
 
   // Use ONE edge consistently
   attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, RISING);
 
   lastCalcMs = millis();
+  lastReportMs = millis();
+
+  for (int i = 0; i < 7; i++) {
+    resetDayUsage(i, -1, -1, -1, -1);
+  }
+
+  loadConfig();
+  connectWiFi();
+  if (WiFi.status() == WL_CONNECTED) {
+    syncTime();
+    setupServer();
+    Serial.print("Web UI: http://");
+    Serial.println(WiFi.localIP());
+  }
+
+  if (timeValid) {
+    struct tm tmNow;
+    time_t now = time(nullptr);
+    localtime_r(&now, &tmNow);
+    if (isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min)) {
+      closeValve();
+    } else {
+      openValve();
+    }
+  } else {
+    openValve();
+  }
 
   Serial.println("=================================");
   Serial.println("ESP32 Water Flow Control System");
-  Serial.println("Commands: OPEN, CLOSE, RESET, STATUS");
+  Serial.println("Commands: OP, CL, RS, ST");
   Serial.println("=================================");
 }
 
@@ -92,20 +251,47 @@ void loop() {
     float pulsesPerSec = (float)pulses;
 
     // L/min = (pulses/sec) * (60 sec/min) / (pulses/L)
-    flowRateLpm = (pulsesPerSec * 60.0f) / PULSES_PER_LITER;
-
-    // liters added in 1 second = (L/min)/60
-    totalLiters += flowRateLpm / 60.0f;
-
-    Serial.print("Pulses/s: ");
-    Serial.print(pulses);
-    Serial.print(" | Flow: ");
-    Serial.print(flowRateLpm, 2);
-    Serial.print(" L/min | Total: ");
-    Serial.print(totalLiters, 3);
-    Serial.println(" L");
+    flowRateLpm = (pulsesPerSec * 60.0f) / config.pulsesPerLiter;
 
     lastCalcMs = nowMs;
+
+    if (timeValid) {
+      struct tm tmNow;
+      time_t now = time(nullptr);
+      localtime_r(&now, &tmNow);
+
+      ensureDaySlot(tmNow);
+
+      int secOfDay = (tmNow.tm_hour * 3600) + (tmNow.tm_min * 60) + tmNow.tm_sec;
+      bool isActive = flowRateLpm > config.flowActiveLpm;
+      if (isActive && !flowActive) {
+        startInterval(weekUsage[weekIndex], secOfDay);
+      } else if (!isActive && flowActive) {
+        closeInterval(weekUsage[weekIndex], secOfDay);
+      }
+
+      if (isActive) {
+        float litersThisSecond = flowRateLpm / 60.0f;
+        weekUsage[weekIndex].totalSeconds++;
+        weekUsage[weekIndex].totalLiters += litersThisSecond;
+        totalLiters += litersThisSecond;
+        dailyLiters += litersThisSecond;
+        if (activeIntervalIndex >= 0) {
+          weekUsage[weekIndex].intervals[activeIntervalIndex].liters += litersThisSecond;
+          updateIntervalEnd(weekUsage[weekIndex], secOfDay);
+        }
+      }
+      flowActive = isActive;
+
+      if (isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min) && valveState) {
+        closeValve();
+      }
+    }
+  }
+
+  if (timeValid && (nowMs - lastReportMs) >= config.reportIntervalMs) {
+    printReportTo(Serial);
+    lastReportMs = nowMs;
   }
 
   // Serial commands
@@ -114,10 +300,27 @@ void loop() {
     cmd.trim();
     cmd.toUpperCase();
 
-    if (cmd == "OPEN") openValve();
-    else if (cmd == "CLOSE") closeValve();
-    else if (cmd == "RESET") resetCounters();
-    else if (cmd == "STATUS") printStatus();
-    else Serial.println("Unknown command. Use: OPEN, CLOSE, RESET, STATUS");
+    if (cmd == "OP") {
+      if (timeValid) {
+        struct tm tmNow;
+        time_t now = time(nullptr);
+        localtime_r(&now, &tmNow);
+        if (isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min)) {
+          Serial.println("OPEN blocked by schedule.");
+        } else {
+          openValve();
+        }
+      } else {
+        openValve();
+      }
+    }
+    else if (cmd == "CL") closeValve();
+    else if (cmd == "RS") resetCounters();
+    else if (cmd == "ST") printReportTo(Serial);
+    else Serial.println("Unknown command. Use: OP, CL, RS, ST");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    handleWebServer();
   }
 }
