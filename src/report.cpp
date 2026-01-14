@@ -91,9 +91,15 @@ void printReportTo(Print &out) {
     printFloatFixed(out, weekUsage[idx].totalLiters, 7, 3);
     out.println(" L");
 
-    out.println("  FROM   TO     DUR       L");
-
+    bool printed = false;
     for (int j = 0; j < weekUsage[idx].intervalCount; j++) {
+      if (weekUsage[idx].intervals[j].liters < config.minIntervalLiters) {
+        continue;
+      }
+      if (!printed) {
+        out.println("  FROM   TO     DUR       L");
+        printed = true;
+      }
       uint32_t startSec = weekUsage[idx].intervals[j].startSec;
       uint32_t endSec = weekUsage[idx].intervals[j].endSec;
       uint32_t duration = (endSec >= startSec) ? (endSec - startSec) : 0;
@@ -106,6 +112,9 @@ void printReportTo(Print &out) {
       printPadding(out, 2);
       printFloatFixed(out, weekUsage[idx].intervals[j].liters, 7, 3);
       out.println();
+    }
+    if (!printed) {
+      out.println("  No intervals");
     }
     out.println("--------------------------------------------------");
   }
@@ -169,8 +178,13 @@ String buildReportJson() {
     json += String(weekUsage[idx].totalLiters, 3);
     json += ",\"intervals\":[";
 
+    bool firstInterval = true;
     for (int j = 0; j < weekUsage[idx].intervalCount; j++) {
-      if (j > 0) json += ",";
+      if (weekUsage[idx].intervals[j].liters < config.minIntervalLiters) {
+        continue;
+      }
+      if (!firstInterval) json += ",";
+      firstInterval = false;
       uint32_t startSec = weekUsage[idx].intervals[j].startSec;
       uint32_t endSec = weekUsage[idx].intervals[j].endSec;
       uint32_t duration = (endSec >= startSec) ? (endSec - startSec) : 0;

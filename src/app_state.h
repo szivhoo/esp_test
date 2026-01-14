@@ -24,6 +24,7 @@ struct DayUsage {
 
 struct Config {
   float flowActiveLpm;
+  float minIntervalLiters;
   uint32_t reportIntervalMs;
   int closeStartHour;
   int closeStartMin;

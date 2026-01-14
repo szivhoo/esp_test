@@ -6,6 +6,7 @@
 
 static const float DEFAULT_PULSES_PER_LITER = 450.0f;
 static const float DEFAULT_FLOW_ACTIVE_LPM = 0.1f;
+static const float DEFAULT_MIN_INTERVAL_LITERS = 0.1f;
 static const uint32_t DEFAULT_REPORT_INTERVAL_MS = 10000;
 static const int DEFAULT_CLOSE_START_HOUR = 19;
 static const int DEFAULT_CLOSE_START_MIN = 24;
@@ -18,6 +19,7 @@ static Preferences prefs;
 void loadConfig() {
   prefs.begin("watercfg", true);
   config.flowActiveLpm = prefs.getFloat("flow_lpm", DEFAULT_FLOW_ACTIVE_LPM);
+  config.minIntervalLiters = prefs.getFloat("min_int_l", DEFAULT_MIN_INTERVAL_LITERS);
   config.reportIntervalMs = prefs.getUInt("report_ms", DEFAULT_REPORT_INTERVAL_MS);
   config.closeStartHour = prefs.getInt("csh", DEFAULT_CLOSE_START_HOUR);
   config.closeStartMin = prefs.getInt("csm", DEFAULT_CLOSE_START_MIN);
@@ -32,6 +34,7 @@ void loadConfig() {
 void saveConfig() {
   prefs.begin("watercfg", false);
   prefs.putFloat("flow_lpm", config.flowActiveLpm);
+  prefs.putFloat("min_int_l", config.minIntervalLiters);
   prefs.putUInt("report_ms", config.reportIntervalMs);
   prefs.putInt("csh", config.closeStartHour);
   prefs.putInt("csm", config.closeStartMin);
