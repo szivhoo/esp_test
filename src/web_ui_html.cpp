@@ -109,6 +109,16 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
     .btn.good {
       background: var(--accent-2);
     }
+    .link-btn {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: #111827;
+      color: #f9fafb;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+    }
     .row {
       display: flex;
       gap: 10px;
@@ -211,6 +221,28 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       font-size: 12px;
       color: #1f2937;
     }
+    .summary-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .summary-row {
+      display: grid;
+      grid-template-columns: 90px 120px 1fr;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      font-size: 12px;
+    }
+    .summary-row.header {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
   </style>
 </head>
 <body>
@@ -235,7 +267,6 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
         <div class="row" style="margin: 12px 0;">
           <button class="btn good" onclick="sendValve('open')">Open</button>
           <button class="btn secondary" onclick="sendValve('close')">Close</button>
-          <button class="btn" onclick="sendReset()">Reset</button>
         </div>
         <div class="sub">Flow: <span id="flowRate">--</span> L/min</div>
         <div class="sub">Today: <span id="dailyLiters">--</span> L</div>
@@ -255,6 +286,19 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       <h2>Report</h2>
       <div id="report" class="report-grid">Loading...</div>
       <div class="footer">Auto-refreshes every 10 seconds.</div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>History</h2>
+      <div class="row" style="margin-bottom: 10px;">
+        <a class="link-btn" href="/api/usage.csv" target="_blank" rel="noopener">Usage CSV</a>
+        <a class="link-btn" href="/api/intervals.csv" target="_blank" rel="noopener">Intervals CSV</a>
+        <a class="link-btn" href="/api/config.csv" target="_blank" rel="noopener">Config CSV</a>
+      </div>
+      <div class="sub">Weekly totals</div>
+      <div id="summaryWeeks" class="summary-grid">Loading...</div>
+      <div class="sub" style="margin-top: 10px;">Monthly totals</div>
+      <div id="summaryMonths" class="summary-grid">Loading...</div>
     </div>
 
     <div class="card config-panel" id="configPanel">
@@ -314,7 +358,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       currentInterval = ms;
       if (statusTimer) clearInterval(statusTimer);
       if (reportTimer) clearInterval(reportTimer);
-      statusTimer = setInterval(loadStatus, ms);
+      statusTimer = setInterval(loadStatus, 1000);
       reportTimer = setInterval(loadReport, ms);
       document.querySelector('.footer').textContent = `Auto-refreshes every ${ms / 1000}s.`;
     }
@@ -384,6 +428,31 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       const res = await fetch('/api/report.json?t=' + Date.now(), {cache: 'no-store'});
       renderReport(await res.json());
     }
+    function renderSummary(hostId, data) {
+      const host = document.getElementById(hostId);
+      if (!data || !Array.isArray(data.items) || data.items.length === 0) {
+        host.textContent = 'No history yet.';
+        return;
+      }
+      let html = '';
+      html += `<div class="summary-row header">` +
+              `<div>Period</div><div>Duration</div><div>Liters</div>` +
+              `</div>`;
+      data.items.forEach(item => {
+        html += `<div class="summary-row">` +
+                `<div>${item.label}</div>` +
+                `<div>${formatDuration(item.total_sec || 0)}</div>` +
+                `<div>${Number(item.total_l || 0).toFixed(3)} L</div>` +
+                `</div>`;
+      });
+      host.innerHTML = html;
+    }
+    async function loadSummary() {
+      const week = await fetchJson('/api/summary.json?period=week&limit=12&t=' + Date.now());
+      renderSummary('summaryWeeks', week);
+      const month = await fetchJson('/api/summary.json?period=month&limit=12&t=' + Date.now());
+      renderSummary('summaryMonths', month);
+    }
     async function loadConfig() {
       const c = await fetchJson('/api/config?t=' + Date.now());
       for (const key in c) {
@@ -410,11 +479,6 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       }
       loadStatus();
     }
-    async function sendReset() {
-      await fetch('/api/reset', {method: 'POST'});
-      loadStatus();
-      loadReport();
-    }
     document.getElementById('configForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msg = document.getElementById('configMsg');
@@ -439,6 +503,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
     });
     loadStatus();
     loadReport();
+    loadSummary();
     loadConfig();
   </script>
 </body>

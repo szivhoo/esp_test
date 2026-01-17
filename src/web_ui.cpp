@@ -1,11 +1,13 @@
 #include "web_ui.h"
 
 #include <WebServer.h>
+#include <SPIFFS.h>
 #include <time.h>
 
 #include "app_state.h"
 #include "config.h"
 #include "report.h"
+#include "storage.h"
 #include "web_ui_html.h"
 
 static WebServer server(80);
@@ -214,6 +216,42 @@ static void handleConfigGet() {
   server.send(200, "application/json", buildConfigJson());
 }
 
+static void streamCsvFile(const char *path) {
+  if (!storageReady()) {
+    server.send(503, "text/plain", "Storage not ready.");
+    return;
+  }
+  File file = SPIFFS.open(path, "r");
+  if (!file) {
+    server.send(404, "text/plain", "CSV not found.");
+    return;
+  }
+  server.streamFile(file, "text/csv");
+  file.close();
+}
+
+static void handleConfigCsv() {
+  streamCsvFile(CONFIG_CSV_PATH);
+}
+
+static void handleUsageCsv() {
+  streamCsvFile(USAGE_CSV_PATH);
+}
+
+static void handleIntervalsCsv() {
+  streamCsvFile(INTERVALS_CSV_PATH);
+}
+
+static void handleSummaryJson() {
+  String period = server.arg("period");
+  period.toLowerCase();
+  if (period != "week" && period != "month") {
+    period = "week";
+  }
+  int limit = server.hasArg("limit") ? server.arg("limit").toInt() : 12;
+  server.send(200, "application/json", buildSummaryJson(period, limit));
+}
+
 static void handleConfigPost() {
   if (!applyConfigFromArgs()) {
     server.send(400, "application/json", "{\"ok\":false}");
@@ -226,19 +264,12 @@ static void handleValve() {
   String action = server.arg("action");
   action.toLowerCase();
   if (action == "open") {
-    if (timeValid) {
-      struct tm tmNow;
-      if (getLocalTimeSafe(tmNow) && isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min)) {
-        server.send(403, "application/json", "{\"ok\":false,\"reason\":\"blocked\"}");
-        return;
-      }
-    }
-    openValve();
+    manualOverrideOpen();
     server.send(200, "application/json", "{\"ok\":true,\"valve\":\"OPEN\"}");
     return;
   }
   if (action == "close") {
-    closeValve();
+    manualOverrideClose();
     server.send(200, "application/json", "{\"ok\":true,\"valve\":\"CLOSED\"}");
     return;
   }
@@ -259,10 +290,13 @@ void setupServer() {
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/report", HTTP_GET, handleReport);
   server.on("/api/report.json", HTTP_GET, handleReportJson);
+  server.on("/api/summary.json", HTTP_GET, handleSummaryJson);
   server.on("/api/config", HTTP_GET, handleConfigGet);
   server.on("/api/config", HTTP_POST, handleConfigPost);
+  server.on("/api/config.csv", HTTP_GET, handleConfigCsv);
+  server.on("/api/usage.csv", HTTP_GET, handleUsageCsv);
+  server.on("/api/intervals.csv", HTTP_GET, handleIntervalsCsv);
   server.on("/api/valve", HTTP_POST, handleValve);
-  server.on("/api/reset", HTTP_POST, handleReset);
   server.onNotFound(handleNotFound);
   server.begin();
 }

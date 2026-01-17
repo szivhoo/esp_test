@@ -5,6 +5,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "report.h"
+#include "storage.h"
 #include "web_ui.h"
 #include "secrets.h"
 
@@ -34,6 +35,13 @@ int currentYday = -1;
 bool timeValid = false;
 bool flowActive = false;
 int activeIntervalIndex = -1;
+bool skipPersistOnNextRollover = false;
+bool manualOverride = false;
+bool manualOverrideStartInClosed = false;
+
+int lastLoadedYear = 0;
+int lastLoadedMonth = 0;
+int lastLoadedDay = 0;
 
 Config config;
 
@@ -55,6 +63,30 @@ void closeValve() {
   digitalWrite(VALVE_PIN, HIGH);
   valveState = false;
   Serial.println(">>> VALVE CLOSED <<<");
+}
+
+static void setManualOverride(bool openState) {
+  manualOverride = true;
+  manualOverrideStartInClosed = false;
+  if (timeValid) {
+    struct tm tmNow;
+    if (getLocalTimeSafe(tmNow)) {
+      manualOverrideStartInClosed = isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min);
+    }
+  }
+  if (openState) {
+    openValve();
+  } else {
+    closeValve();
+  }
+}
+
+void manualOverrideOpen() {
+  setManualOverride(true);
+}
+
+void manualOverrideClose() {
+  setManualOverride(false);
 }
 
 void resetCounters() {
@@ -148,6 +180,13 @@ void ensureDaySlot(struct tm &tmNow) {
   if (flowActive && prevIndex >= 0) {
     closeInterval(weekUsage[prevIndex], 86399);
   }
+  if (prevIndex >= 0 && weekUsage[prevIndex].year >= 0) {
+    if (!skipPersistOnNextRollover) {
+      appendDayUsageCsv(weekUsage[prevIndex]);
+    } else {
+      skipPersistOnNextRollover = false;
+    }
+  }
 
   weekIndex = (weekIndex + 1) % 7;
   resetDayUsage(weekIndex, tmNow.tm_year + 1900, tmNow.tm_mon + 1, tmNow.tm_mday, tmNow.tm_wday);
@@ -208,13 +247,29 @@ void setup() {
     resetDayUsage(i, -1, -1, -1, -1);
   }
 
+  initStorage();
   loadConfig();
+  bool usageLoaded = loadUsageFromCsv(lastLoadedYear, lastLoadedMonth, lastLoadedDay);
   connectWiFi();
   if (WiFi.status() == WL_CONNECTED) {
     syncTime();
     setupServer();
     Serial.print("Web UI: http://");
     Serial.println(WiFi.localIP());
+  }
+
+  if (timeValid && usageLoaded) {
+    struct tm tmLast = {};
+    tmLast.tm_year = lastLoadedYear - 1900;
+    tmLast.tm_mon = lastLoadedMonth - 1;
+    tmLast.tm_mday = lastLoadedDay;
+    tmLast.tm_hour = 12;
+    tmLast.tm_isdst = -1;
+    time_t lastTs = mktime(&tmLast);
+    localtime_r(&lastTs, &tmLast);
+    currentYear = tmLast.tm_year;
+    currentYday = tmLast.tm_yday;
+    skipPersistOnNextRollover = true;
   }
 
   if (timeValid) {
@@ -283,8 +338,22 @@ void loop() {
       }
       flowActive = isActive;
 
-      if (isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min) && valveState) {
-        closeValve();
+      bool inClosedWindow = isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min);
+      if (manualOverride) {
+        if (inClosedWindow != manualOverrideStartInClosed) {
+          manualOverride = false;
+          if (inClosedWindow && valveState) {
+            closeValve();
+          } else if (!inClosedWindow && !valveState) {
+            openValve();
+          }
+        }
+      } else {
+        if (inClosedWindow && valveState) {
+          closeValve();
+        } else if (!inClosedWindow && !valveState) {
+          openValve();
+        }
       }
     }
   }
@@ -301,20 +370,9 @@ void loop() {
     cmd.toUpperCase();
 
     if (cmd == "OP") {
-      if (timeValid) {
-        struct tm tmNow;
-        time_t now = time(nullptr);
-        localtime_r(&now, &tmNow);
-        if (isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min)) {
-          Serial.println("OPEN blocked by schedule.");
-        } else {
-          openValve();
-        }
-      } else {
-        openValve();
-      }
+      manualOverrideOpen();
     }
-    else if (cmd == "CL") closeValve();
+    else if (cmd == "CL") manualOverrideClose();
     else if (cmd == "RS") resetCounters();
     else if (cmd == "ST") printReportTo(Serial);
     else Serial.println("Unknown command. Use: OP, CL, RS, ST");

@@ -54,3 +54,5 @@ void ensureDaySlot(struct tm &tmNow);
 void startInterval(DayUsage &day, int secOfDay);
 void updateIntervalEnd(DayUsage &day, int secOfDay);
 void closeInterval(DayUsage &day, int secOfDay);
+void manualOverrideOpen();
+void manualOverrideClose();
