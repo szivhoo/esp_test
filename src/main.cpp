@@ -131,10 +131,7 @@ bool isTimeSane() {
   return now >= 1609459200;
 }
 
-bool isWithinClosedWindow(int hour, int minute) {
-  int startMin = (config.closeStartHour * 60) + config.closeStartMin;
-  int endMin = (config.closeEndHour * 60) + config.closeEndMin;
-  int nowMin = (hour * 60) + minute;
+static bool isWithinWindow(int startMin, int endMin, int nowMin) {
   if (startMin == endMin) {
     return false;
   }
@@ -142,6 +139,18 @@ bool isWithinClosedWindow(int hour, int minute) {
     return (nowMin >= startMin) && (nowMin < endMin);
   }
   return (nowMin >= startMin) || (nowMin < endMin);
+}
+
+bool isWithinClosedWindow(int hour, int minute) {
+  int nowMin = (hour * 60) + minute;
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    int startMin = (config.closeStartHour[i] * 60) + config.closeStartMin[i];
+    int endMin = (config.closeEndHour[i] * 60) + config.closeEndMin[i];
+    if (isWithinWindow(startMin, endMin, nowMin)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void startInterval(DayUsage &day, int secOfDay) {

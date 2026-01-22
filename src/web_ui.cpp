@@ -30,9 +30,17 @@ private:
   String &buf;
 };
 
+static void appendTime(String &json, int hour, int minute) {
+  if (hour < 10) json += "0";
+  json += String(hour);
+  json += ":";
+  if (minute < 10) json += "0";
+  json += String(minute);
+}
+
 static String buildStatusJson() {
   String json;
-  json.reserve(256);
+  json.reserve(512);
   json += "{";
   json += "\"time_valid\":";
   json += (timeValid ? "true" : "false");
@@ -74,26 +82,28 @@ static String buildStatusJson() {
   json += ",\"report_interval_ms\":";
   json += String(config.reportIntervalMs);
   json += ",\"close_start\":\"";
-  if (config.closeStartHour < 10) json += "0";
-  json += String(config.closeStartHour);
-  json += ":";
-  if (config.closeStartMin < 10) json += "0";
-  json += String(config.closeStartMin);
+  appendTime(json, config.closeStartHour[0], config.closeStartMin[0]);
   json += "\"";
   json += ",\"close_end\":\"";
-  if (config.closeEndHour < 10) json += "0";
-  json += String(config.closeEndHour);
-  json += ":";
-  if (config.closeEndMin < 10) json += "0";
-  json += String(config.closeEndMin);
+  appendTime(json, config.closeEndHour[0], config.closeEndMin[0]);
   json += "\"";
+  json += ",\"close_windows\":[";
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    if (i > 0) json += ",";
+    json += "{\"start\":\"";
+    appendTime(json, config.closeStartHour[i], config.closeStartMin[i]);
+    json += "\",\"end\":\"";
+    appendTime(json, config.closeEndHour[i], config.closeEndMin[i]);
+    json += "\"}";
+  }
+  json += "]";
   json += "}";
   return json;
 }
 
 static String buildConfigJson() {
   String json;
-  json.reserve(256);
+  json.reserve(512);
   json += "{";
   json += "\"flow_active_lpm\":";
   json += String(config.flowActiveLpm, 3);
@@ -101,20 +111,18 @@ static String buildConfigJson() {
   json += String(config.minIntervalLiters, 3);
   json += ",\"report_interval_ms\":";
   json += String(config.reportIntervalMs);
-  json += ",\"close_start\":\"";
-  if (config.closeStartHour < 10) json += "0";
-  json += String(config.closeStartHour);
-  json += ":";
-  if (config.closeStartMin < 10) json += "0";
-  json += String(config.closeStartMin);
-  json += "\"";
-  json += ",\"close_end\":\"";
-  if (config.closeEndHour < 10) json += "0";
-  json += String(config.closeEndHour);
-  json += ":";
-  if (config.closeEndMin < 10) json += "0";
-  json += String(config.closeEndMin);
-  json += "\"";
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    json += ",\"close_start_";
+    json += String(i + 1);
+    json += "\":\"";
+    appendTime(json, config.closeStartHour[i], config.closeStartMin[i]);
+    json += "\"";
+    json += ",\"close_end_";
+    json += String(i + 1);
+    json += "\":\"";
+    appendTime(json, config.closeEndHour[i], config.closeEndMin[i]);
+    json += "\"";
+  }
   json += ",\"pulses_per_liter\":";
   json += String(config.pulsesPerLiter, 2);
   json += ",\"tz_info\":\"";
@@ -148,21 +156,35 @@ static bool applyConfigFromArgs() {
     minInterval = server.arg("min_interval_l").toFloat();
   }
   uint32_t reportMs = (uint32_t)server.arg("report_interval_ms").toInt();
-  int csh = config.closeStartHour;
-  int csm = config.closeStartMin;
-  int ceh = config.closeEndHour;
-  int cem = config.closeEndMin;
-  if (server.hasArg("close_start")) {
-    if (!parseTimeArg(server.arg("close_start"), csh, csm)) return false;
-  } else {
-    csh = server.arg("close_start_hour").toInt();
-    csm = server.arg("close_start_min").toInt();
-  }
-  if (server.hasArg("close_end")) {
-    if (!parseTimeArg(server.arg("close_end"), ceh, cem)) return false;
-  } else {
-    ceh = server.arg("close_end_hour").toInt();
-    cem = server.arg("close_end_min").toInt();
+  int csh[BLOCKED_WINDOW_COUNT];
+  int csm[BLOCKED_WINDOW_COUNT];
+  int ceh[BLOCKED_WINDOW_COUNT];
+  int cem[BLOCKED_WINDOW_COUNT];
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    csh[i] = config.closeStartHour[i];
+    csm[i] = config.closeStartMin[i];
+    ceh[i] = config.closeEndHour[i];
+    cem[i] = config.closeEndMin[i];
+
+    String startKey = "close_start_" + String(i + 1);
+    String endKey = "close_end_" + String(i + 1);
+    if (server.hasArg(startKey)) {
+      if (!parseTimeArg(server.arg(startKey), csh[i], csm[i])) return false;
+    } else if (i == 0 && server.hasArg("close_start")) {
+      if (!parseTimeArg(server.arg("close_start"), csh[i], csm[i])) return false;
+    } else if (i == 0 && server.hasArg("close_start_hour")) {
+      csh[i] = server.arg("close_start_hour").toInt();
+      csm[i] = server.arg("close_start_min").toInt();
+    }
+
+    if (server.hasArg(endKey)) {
+      if (!parseTimeArg(server.arg(endKey), ceh[i], cem[i])) return false;
+    } else if (i == 0 && server.hasArg("close_end")) {
+      if (!parseTimeArg(server.arg("close_end"), ceh[i], cem[i])) return false;
+    } else if (i == 0 && server.hasArg("close_end_hour")) {
+      ceh[i] = server.arg("close_end_hour").toInt();
+      cem[i] = server.arg("close_end_min").toInt();
+    }
   }
   float ppl = server.arg("pulses_per_liter").toFloat();
   String tz = server.arg("tz_info");
@@ -170,20 +192,24 @@ static bool applyConfigFromArgs() {
   if (flow <= 0.0f || flow > 100.0f) return false;
   if (minInterval < 0.0f || minInterval > 1000.0f) return false;
   if (reportMs < 1000 || reportMs > 3600000) return false;
-  if (csh < 0 || csh > 23) return false;
-  if (csm < 0 || csm > 59) return false;
-  if (ceh < 0 || ceh > 23) return false;
-  if (cem < 0 || cem > 59) return false;
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    if (csh[i] < 0 || csh[i] > 23) return false;
+    if (csm[i] < 0 || csm[i] > 59) return false;
+    if (ceh[i] < 0 || ceh[i] > 23) return false;
+    if (cem[i] < 0 || cem[i] > 59) return false;
+  }
   if (ppl <= 1.0f || ppl > 10000.0f) return false;
   if (tz.length() == 0 || tz.length() >= (int)sizeof(config.tzInfo)) return false;
 
   config.flowActiveLpm = flow;
   config.minIntervalLiters = minInterval;
   config.reportIntervalMs = reportMs;
-  config.closeStartHour = csh;
-  config.closeStartMin = csm;
-  config.closeEndHour = ceh;
-  config.closeEndMin = cem;
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    config.closeStartHour[i] = csh[i];
+    config.closeStartMin[i] = csm[i];
+    config.closeEndHour[i] = ceh[i];
+    config.closeEndMin[i] = cem[i];
+  }
   config.pulsesPerLiter = ppl;
   tz.toCharArray(config.tzInfo, sizeof(config.tzInfo));
   saveConfig();

@@ -36,57 +36,68 @@ bool storageReady() {
 }
 
 static bool parseConfigCsvLine(const char *line) {
-  char buf[192];
+  char buf[256];
   strncpy(buf, line, sizeof(buf) - 1);
   buf[sizeof(buf) - 1] = '\0';
 
+  char *tokens[32];
+  int count = 0;
   char *save = nullptr;
   char *tok = strtok_r(buf, ",", &save);
-  if (!tok) return false;
+  while (tok && count < (int)(sizeof(tokens) / sizeof(tokens[0]))) {
+    tokens[count++] = tok;
+    tok = strtok_r(nullptr, ",", &save);
+  }
 
-  float flow = atof(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  float minInterval = atof(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  uint32_t reportMs = (uint32_t)strtoul(tok, nullptr, 10);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  int csh = atoi(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  int csm = atoi(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  int ceh = atoi(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  int cem = atoi(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  float ppl = atof(tok);
-  tok = strtok_r(nullptr, ",", &save);
-  if (!tok) return false;
-  const char *tz = tok;
+  const int expectedNew = 3 + (BLOCKED_WINDOW_COUNT * 4) + 2;
+  if (count != 9 && count != expectedNew) return false;
+
+  float flow = atof(tokens[0]);
+  float minInterval = atof(tokens[1]);
+  uint32_t reportMs = (uint32_t)strtoul(tokens[2], nullptr, 10);
+  int startIndex = 3;
+  float ppl = 0.0f;
+  const char *tz = nullptr;
+
+  if (count == 9) {
+    ppl = atof(tokens[7]);
+    tz = tokens[8];
+  } else {
+    ppl = atof(tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4)]);
+    tz = tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4) + 1];
+  }
 
   if (flow <= 0.0f || flow > 100.0f) return false;
   if (minInterval < 0.0f || minInterval > 1000.0f) return false;
   if (reportMs < 1000 || reportMs > 3600000) return false;
-  if (csh < 0 || csh > 23) return false;
-  if (csm < 0 || csm > 59) return false;
-  if (ceh < 0 || ceh > 23) return false;
-  if (cem < 0 || cem > 59) return false;
   if (ppl <= 1.0f || ppl > 10000.0f) return false;
   if (strlen(tz) == 0 || strlen(tz) >= sizeof(config.tzInfo)) return false;
 
   config.flowActiveLpm = flow;
   config.minIntervalLiters = minInterval;
   config.reportIntervalMs = reportMs;
-  config.closeStartHour = csh;
-  config.closeStartMin = csm;
-  config.closeEndHour = ceh;
-  config.closeEndMin = cem;
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    if (count == expectedNew || i == 0) {
+      int idx = startIndex + (i * 4);
+      int csh = atoi(tokens[idx]);
+      int csm = atoi(tokens[idx + 1]);
+      int ceh = atoi(tokens[idx + 2]);
+      int cem = atoi(tokens[idx + 3]);
+      if (csh < 0 || csh > 23) return false;
+      if (csm < 0 || csm > 59) return false;
+      if (ceh < 0 || ceh > 23) return false;
+      if (cem < 0 || cem > 59) return false;
+      config.closeStartHour[i] = csh;
+      config.closeStartMin[i] = csm;
+      config.closeEndHour[i] = ceh;
+      config.closeEndMin[i] = cem;
+    } else {
+      config.closeStartHour[i] = 0;
+      config.closeStartMin[i] = 0;
+      config.closeEndHour[i] = 0;
+      config.closeEndMin[i] = 0;
+    }
+  }
   config.pulsesPerLiter = ppl;
   strncpy(config.tzInfo, tz, sizeof(config.tzInfo) - 1);
   config.tzInfo[sizeof(config.tzInfo) - 1] = '\0';
@@ -98,7 +109,7 @@ bool loadConfigCsv() {
   File file = SPIFFS.open(CONFIG_CSV_PATH, "r");
   if (!file) return false;
 
-  char line[192];
+  char line[256];
   bool loaded = false;
   while (file.available()) {
     size_t len = file.readBytesUntil('\n', line, sizeof(line) - 1);
@@ -118,20 +129,22 @@ bool saveConfigCsv() {
   if (!storageReadyFlag) return false;
   File file = SPIFFS.open(CONFIG_CSV_PATH, "w");
   if (!file) return false;
-  file.println("flow_active_lpm,min_interval_l,report_interval_ms,close_start_hour,close_start_min,close_end_hour,close_end_min,pulses_per_liter,tz_info");
+  file.println("flow_active_lpm,min_interval_l,report_interval_ms,close1_start_hour,close1_start_min,close1_end_hour,close1_end_min,close2_start_hour,close2_start_min,close2_end_hour,close2_end_min,close3_start_hour,close3_start_min,close3_end_hour,close3_end_min,pulses_per_liter,tz_info");
   file.print(config.flowActiveLpm, 3);
   file.print(",");
   file.print(config.minIntervalLiters, 3);
   file.print(",");
   file.print(config.reportIntervalMs);
-  file.print(",");
-  file.print(config.closeStartHour);
-  file.print(",");
-  file.print(config.closeStartMin);
-  file.print(",");
-  file.print(config.closeEndHour);
-  file.print(",");
-  file.print(config.closeEndMin);
+  for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
+    file.print(",");
+    file.print(config.closeStartHour[i]);
+    file.print(",");
+    file.print(config.closeStartMin[i]);
+    file.print(",");
+    file.print(config.closeEndHour[i]);
+    file.print(",");
+    file.print(config.closeEndMin[i]);
+  }
   file.print(",");
   file.print(config.pulsesPerLiter, 2);
   file.print(",");

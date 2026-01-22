@@ -4,6 +4,7 @@
 #include <time.h>
 
 constexpr int MAX_INTERVALS = 48;
+constexpr int BLOCKED_WINDOW_COUNT = 3;
 
 struct DayInterval {
   uint32_t startSec;
@@ -26,10 +27,10 @@ struct Config {
   float flowActiveLpm;
   float minIntervalLiters;
   uint32_t reportIntervalMs;
-  int closeStartHour;
-  int closeStartMin;
-  int closeEndHour;
-  int closeEndMin;
+  int closeStartHour[BLOCKED_WINDOW_COUNT];
+  int closeStartMin[BLOCKED_WINDOW_COUNT];
+  int closeEndHour[BLOCKED_WINDOW_COUNT];
+  int closeEndMin[BLOCKED_WINDOW_COUNT];
   float pulsesPerLiter;
   char tzInfo[32];
 };

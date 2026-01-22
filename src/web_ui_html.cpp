@@ -275,7 +275,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       </div>
 
       <div class="card">
-        <h2>Blocked Window</h2>
+        <h2>Blocked Windows</h2>
         <div class="stat" id="scheduleLabel">--</div>
         <div class="sub">Threshold: <span id="flowThreshold">--</span> L/min</div>
         <div class="sub">Report: <span id="reportInterval">--</span> ms</div>
@@ -318,12 +318,28 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
             <input id="report_interval_ms" name="report_interval_ms" type="number" step="1000" min="1000" required>
           </div>
           <div>
-            <label for="close_start">Blocked Start</label>
-            <input id="close_start" name="close_start" type="time" required>
+            <label for="close_start_1">Blocked Start 1</label>
+            <input id="close_start_1" name="close_start_1" type="time" required>
           </div>
           <div>
-            <label for="close_end">Blocked End</label>
-            <input id="close_end" name="close_end" type="time" required>
+            <label for="close_end_1">Blocked End 1</label>
+            <input id="close_end_1" name="close_end_1" type="time" required>
+          </div>
+          <div>
+            <label for="close_start_2">Blocked Start 2</label>
+            <input id="close_start_2" name="close_start_2" type="time" required>
+          </div>
+          <div>
+            <label for="close_end_2">Blocked End 2</label>
+            <input id="close_end_2" name="close_end_2" type="time" required>
+          </div>
+          <div>
+            <label for="close_start_3">Blocked Start 3</label>
+            <input id="close_start_3" name="close_start_3" type="time" required>
+          </div>
+          <div>
+            <label for="close_end_3">Blocked End 3</label>
+            <input id="close_end_3" name="close_end_3" type="time" required>
           </div>
           <div>
             <label for="pulses_per_liter">Pulses Per Liter</label>
@@ -375,7 +391,15 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       document.getElementById('weekLiters').textContent = s.week_liters ?? '--';
       document.getElementById('flowThreshold').textContent = s.flow_active_lpm ?? '--';
       document.getElementById('reportInterval').textContent = s.report_interval_ms ?? '--';
-      document.getElementById('scheduleLabel').textContent = (s.close_start || '--') + ' -> ' + (s.close_end || '--');
+      const windows = Array.isArray(s.close_windows) ? s.close_windows : [];
+      const activeWindows = windows.filter(w => w.start && w.end && w.start !== w.end);
+      let windowLabel = '--';
+      if (activeWindows.length) {
+        windowLabel = activeWindows.map(w => `${w.start} -> ${w.end}`).join(' | ');
+      } else if (s.close_start && s.close_end && s.close_start !== s.close_end) {
+        windowLabel = `${s.close_start} -> ${s.close_end}`;
+      }
+      document.getElementById('scheduleLabel').textContent = windowLabel;
       document.getElementById('timeBadge').textContent = s.time || '--:--:--';
       document.getElementById('dateLabel').textContent = s.date || '--';
       resetTimers(s.report_interval_ms);
