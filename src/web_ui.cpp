@@ -81,6 +81,10 @@ static String buildStatusJson() {
   json += String(config.flowActiveLpm, 3);
   json += ",\"report_interval_ms\":";
   json += String(config.reportIntervalMs);
+  json += ",\"leak_enabled\":";
+  json += (config.leakProtectionEnabled ? "true" : "false");
+  json += ",\"leak_threshold_l\":";
+  json += String(config.leakThresholdLiters, 2);
   json += ",\"close_start\":\"";
   appendTime(json, config.closeStartHour[0], config.closeStartMin[0]);
   json += "\"";
@@ -111,6 +115,10 @@ static String buildConfigJson() {
   json += String(config.minIntervalLiters, 3);
   json += ",\"report_interval_ms\":";
   json += String(config.reportIntervalMs);
+  json += ",\"leak_enabled\":";
+  json += (config.leakProtectionEnabled ? "true" : "false");
+  json += ",\"leak_threshold_l\":";
+  json += String(config.leakThresholdLiters, 2);
   for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
     json += ",\"close_start_";
     json += String(i + 1);
@@ -156,6 +164,16 @@ static bool applyConfigFromArgs() {
     minInterval = server.arg("min_interval_l").toFloat();
   }
   uint32_t reportMs = (uint32_t)server.arg("report_interval_ms").toInt();
+  bool leakEnabled = config.leakProtectionEnabled;
+  if (server.hasArg("leak_enabled")) {
+    String leakArg = server.arg("leak_enabled");
+    leakArg.toLowerCase();
+    leakEnabled = (leakArg == "1" || leakArg == "true" || leakArg == "on");
+  }
+  float leakThreshold = config.leakThresholdLiters;
+  if (server.hasArg("leak_threshold_l")) {
+    leakThreshold = server.arg("leak_threshold_l").toFloat();
+  }
   int csh[BLOCKED_WINDOW_COUNT];
   int csm[BLOCKED_WINDOW_COUNT];
   int ceh[BLOCKED_WINDOW_COUNT];
@@ -192,6 +210,7 @@ static bool applyConfigFromArgs() {
   if (flow <= 0.0f || flow > 100.0f) return false;
   if (minInterval < 0.0f || minInterval > 1000.0f) return false;
   if (reportMs < 1000 || reportMs > 3600000) return false;
+  if (leakThreshold < 1.0f || leakThreshold > 100000.0f) return false;
   for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
     if (csh[i] < 0 || csh[i] > 23) return false;
     if (csm[i] < 0 || csm[i] > 59) return false;
@@ -204,6 +223,8 @@ static bool applyConfigFromArgs() {
   config.flowActiveLpm = flow;
   config.minIntervalLiters = minInterval;
   config.reportIntervalMs = reportMs;
+  config.leakProtectionEnabled = leakEnabled;
+  config.leakThresholdLiters = leakThreshold;
   for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
     config.closeStartHour[i] = csh[i];
     config.closeStartMin[i] = csm[i];

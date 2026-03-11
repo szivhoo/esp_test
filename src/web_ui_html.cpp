@@ -259,48 +259,6 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h2>Live Status</h2>
-        <div class="stat" id="valveState">--</div>
-        <div class="sub" id="dateLabel">--</div>
-        <div class="row" style="margin: 12px 0;">
-          <button class="btn good" onclick="sendValve('open')">Open</button>
-          <button class="btn secondary" onclick="sendValve('close')">Close</button>
-        </div>
-        <div class="sub">Flow: <span id="flowRate">--</span> L/min</div>
-        <div class="sub">Today: <span id="dailyLiters">--</span> L</div>
-        <div class="sub">Week: <span id="weekLiters">--</span> L</div>
-        <div class="action-msg" id="actionMsg"></div>
-      </div>
-
-      <div class="card">
-        <h2>Blocked Windows</h2>
-        <div class="stat" id="scheduleLabel">--</div>
-        <div class="sub">Threshold: <span id="flowThreshold">--</span> L/min</div>
-        <div class="sub">Report: <span id="reportInterval">--</span> ms</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top: 16px;">
-      <h2>Report</h2>
-      <div id="report" class="report-grid">Loading...</div>
-      <div class="footer">Auto-refreshes every 10 seconds.</div>
-    </div>
-
-    <div class="card" style="margin-top: 16px;">
-      <h2>History</h2>
-      <div class="row" style="margin-bottom: 10px;">
-        <a class="link-btn" href="/api/usage.csv" target="_blank" rel="noopener">Usage CSV</a>
-        <a class="link-btn" href="/api/intervals.csv" target="_blank" rel="noopener">Intervals CSV</a>
-        <a class="link-btn" href="/api/config.csv" target="_blank" rel="noopener">Config CSV</a>
-      </div>
-      <div class="sub">Weekly totals</div>
-      <div id="summaryWeeks" class="summary-grid">Loading...</div>
-      <div class="sub" style="margin-top: 10px;">Monthly totals</div>
-      <div id="summaryMonths" class="summary-grid">Loading...</div>
-    </div>
-
     <div class="card config-panel" id="configPanel">
       <h2>Configuration</h2>
       <form id="configForm">
@@ -316,6 +274,17 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
           <div>
             <label for="report_interval_ms">Report Interval (ms)</label>
             <input id="report_interval_ms" name="report_interval_ms" type="number" step="1000" min="1000" required>
+          </div>
+          <div>
+            <label for="leak_enabled">Leak Protection</label>
+            <select id="leak_enabled" name="leak_enabled" required>
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+          <div>
+            <label for="leak_threshold_l">Leak Threshold (L)</label>
+            <input id="leak_threshold_l" name="leak_threshold_l" type="number" step="0.1" min="1" required>
           </div>
           <div>
             <label for="close_start_1">Blocked Start 1</label>
@@ -361,6 +330,49 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
         </div>
       </form>
     </div>
+
+    <div class="grid" style="margin-top: 16px;">
+      <div class="card">
+        <h2>Live Status</h2>
+        <div class="stat" id="valveState">--</div>
+        <div class="sub" id="dateLabel">--</div>
+        <div class="row" style="margin: 12px 0;">
+          <button class="btn good" onclick="sendValve('open')">Open</button>
+          <button class="btn secondary" onclick="sendValve('close')">Close</button>
+        </div>
+        <div class="sub">Flow: <span id="flowRate">--</span> L/min</div>
+        <div class="sub">Today: <span id="dailyLiters">--</span> L</div>
+        <div class="sub">Week: <span id="weekLiters">--</span> L</div>
+        <div class="action-msg" id="actionMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2>Blocked Windows</h2>
+        <div class="stat" id="scheduleLabel">--</div>
+        <div class="sub">Threshold: <span id="flowThreshold">--</span> L/min</div>
+        <div class="sub">Report: <span id="reportInterval">--</span> ms</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Report</h2>
+      <div id="report" class="report-grid">Loading...</div>
+      <div class="footer">Auto-refreshes every 10 seconds.</div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>History</h2>
+      <div class="row" style="margin-bottom: 10px;">
+        <a class="link-btn" href="/api/usage.csv" target="_blank" rel="noopener">Usage CSV</a>
+        <a class="link-btn" href="/api/intervals.csv" target="_blank" rel="noopener">Intervals CSV</a>
+        <a class="link-btn" href="/api/config.csv" target="_blank" rel="noopener">Config CSV</a>
+      </div>
+      <div class="sub">Weekly totals</div>
+      <div id="summaryWeeks" class="summary-grid">Loading...</div>
+      <div class="sub" style="margin-top: 10px;">Monthly totals</div>
+      <div id="summaryMonths" class="summary-grid">Loading...</div>
+    </div>
+
   </div>
 
   <script>

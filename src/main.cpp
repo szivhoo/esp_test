@@ -20,6 +20,9 @@ static const uint32_t MIN_PULSE_US = 300;
 
 uint32_t lastCalcMs = 0;
 uint32_t lastReportMs = 0;
+uint32_t lastFlowLogMs = 0;
+uint32_t lastTimeSyncMs = 0;
+uint32_t lastWifiRetryMs = 0;
 float flowRateLpm = 0.0f;
 float totalLiters = 0.0f;
 float dailyLiters = 0.0f;
@@ -38,6 +41,9 @@ int activeIntervalIndex = -1;
 bool skipPersistOnNextRollover = false;
 bool manualOverride = false;
 bool manualOverrideStartInClosed = false;
+bool leakTripped = false;
+float continuousLiters = 0.0f;
+bool lastInClosedWindow = false;
 
 int lastLoadedYear = 0;
 int lastLoadedMonth = 0;
@@ -82,6 +88,8 @@ static void setManualOverride(bool openState) {
 }
 
 void manualOverrideOpen() {
+  leakTripped = false;
+  continuousLiters = 0.0f;
   setManualOverride(true);
 }
 
@@ -95,6 +103,8 @@ void resetCounters() {
   interrupts();
   totalLiters = 0.0f;
   flowRateLpm = 0.0f;
+  leakTripped = false;
+  continuousLiters = 0.0f;
   Serial.println("* Counters RESET *");
 }
 
@@ -102,6 +112,12 @@ void printStatus() {
   Serial.println("\n=== SYSTEM STATUS ===");
   Serial.print("Valve: ");
   Serial.println(valveState ? "OPEN" : "CLOSED");
+  Serial.print("IP: ");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("not connected");
+  }
   Serial.print("Flow Rate: ");
   Serial.print(flowRateLpm, 2);
   Serial.println(" L/min");
@@ -228,9 +244,7 @@ void connectWiFi() {
 }
 
 void syncTime() {
-  setenv("TZ", config.tzInfo, 1);
-  tzset();
-  configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+  configTzTime(config.tzInfo, NTP_SERVER_1, NTP_SERVER_2);
 
   uint32_t startMs = millis();
   while (!isTimeSane() && (millis() - startMs) < 15000) {
@@ -258,6 +272,8 @@ void setup() {
 
   initStorage();
   loadConfig();
+  setenv("TZ", config.tzInfo, 1);
+  tzset();
   bool usageLoaded = loadUsageFromCsv(lastLoadedYear, lastLoadedMonth, lastLoadedDay);
   connectWiFi();
   if (WiFi.status() == WL_CONNECTED) {
@@ -303,6 +319,16 @@ void setup() {
 void loop() {
   // Calculate once per second
   uint32_t nowMs = millis();
+  if (WiFi.status() != WL_CONNECTED) {
+    if (nowMs - lastWifiRetryMs >= 15000) {
+      connectWiFi();
+      lastWifiRetryMs = nowMs;
+    }
+  } else if (!timeValid && (nowMs - lastTimeSyncMs) >= 60000) {
+    syncTime();
+    lastTimeSyncMs = nowMs;
+  }
+
   if (nowMs - lastCalcMs >= 1000) {
     uint32_t pulses;
 
@@ -334,42 +360,76 @@ void loop() {
         closeInterval(weekUsage[weekIndex], secOfDay);
       }
 
+      if (!config.leakProtectionEnabled) {
+        leakTripped = false;
+        continuousLiters = 0.0f;
+      }
+
       if (isActive) {
         float litersThisSecond = flowRateLpm / 60.0f;
         weekUsage[weekIndex].totalSeconds++;
         weekUsage[weekIndex].totalLiters += litersThisSecond;
         totalLiters += litersThisSecond;
         dailyLiters += litersThisSecond;
+        if (config.leakProtectionEnabled && !leakTripped) {
+          continuousLiters += litersThisSecond;
+          if (continuousLiters >= config.leakThresholdLiters) {
+            leakTripped = true;
+            closeValve();
+            Serial.println("!!! LEAK DETECTED: FLOW LIMIT EXCEEDED - VALVE CLOSED !!!");
+          }
+        }
         if (activeIntervalIndex >= 0) {
           weekUsage[weekIndex].intervals[activeIntervalIndex].liters += litersThisSecond;
           updateIntervalEnd(weekUsage[weekIndex], secOfDay);
         }
+      } else {
+        continuousLiters = 0.0f;
       }
       flowActive = isActive;
 
       bool inClosedWindow = isWithinClosedWindow(tmNow.tm_hour, tmNow.tm_min);
-      if (manualOverride) {
-        if (inClosedWindow != manualOverrideStartInClosed) {
-          manualOverride = false;
+      if (leakTripped && lastInClosedWindow && !inClosedWindow) {
+        leakTripped = false;
+        continuousLiters = 0.0f;
+      }
+      if (leakTripped) {
+        if (valveState) {
+          closeValve();
+        }
+      } else {
+        if (manualOverride) {
+          if (inClosedWindow != manualOverrideStartInClosed) {
+            manualOverride = false;
+            if (inClosedWindow && valveState) {
+              closeValve();
+            } else if (!inClosedWindow && !valveState) {
+              openValve();
+            }
+          }
+        } else {
           if (inClosedWindow && valveState) {
             closeValve();
           } else if (!inClosedWindow && !valveState) {
             openValve();
           }
         }
-      } else {
-        if (inClosedWindow && valveState) {
-          closeValve();
-        } else if (!inClosedWindow && !valveState) {
-          openValve();
-        }
       }
+      lastInClosedWindow = inClosedWindow;
     }
   }
 
-  if (timeValid && (nowMs - lastReportMs) >= config.reportIntervalMs) {
-    printReportTo(Serial);
-    lastReportMs = nowMs;
+  if (nowMs - lastFlowLogMs >= 3000) {
+    Serial.print("Flow Rate: ");
+    Serial.print(flowRateLpm, 2);
+    Serial.println(" L/min");
+    Serial.print("IP: ");
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println(WiFi.localIP());
+    } else {
+      Serial.println("not connected");
+    }
+    lastFlowLogMs = nowMs;
   }
 
   // Serial commands
@@ -384,7 +444,7 @@ void loop() {
     else if (cmd == "CL") manualOverrideClose();
     else if (cmd == "RS") resetCounters();
     else if (cmd == "ST") printReportTo(Serial);
-    else Serial.println("Unknown command. Use: OP, CL, RS, ST");
+    else Serial.println("Unknown command. Use: OP, CL, RS, ST, PS");
   }
 
   if (WiFi.status() == WL_CONNECTED) {

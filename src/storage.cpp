@@ -49,8 +49,10 @@ static bool parseConfigCsvLine(const char *line) {
     tok = strtok_r(nullptr, ",", &save);
   }
 
+  const int expectedOld = 9;
   const int expectedNew = 3 + (BLOCKED_WINDOW_COUNT * 4) + 2;
-  if (count != 9 && count != expectedNew) return false;
+  const int expectedLeak = expectedNew + 2;
+  if (count != expectedOld && count != expectedNew && count != expectedLeak) return false;
 
   float flow = atof(tokens[0]);
   float minInterval = atof(tokens[1]);
@@ -58,13 +60,19 @@ static bool parseConfigCsvLine(const char *line) {
   int startIndex = 3;
   float ppl = 0.0f;
   const char *tz = nullptr;
+  bool leakEnabled = true;
+  float leakThreshold = 100.0f;
 
-  if (count == 9) {
+  if (count == expectedOld) {
     ppl = atof(tokens[7]);
     tz = tokens[8];
   } else {
     ppl = atof(tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4)]);
     tz = tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4) + 1];
+    if (count == expectedLeak) {
+      leakEnabled = atoi(tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4) + 2]) != 0;
+      leakThreshold = atof(tokens[startIndex + (BLOCKED_WINDOW_COUNT * 4) + 3]);
+    }
   }
 
   if (flow <= 0.0f || flow > 100.0f) return false;
@@ -72,10 +80,13 @@ static bool parseConfigCsvLine(const char *line) {
   if (reportMs < 1000 || reportMs > 3600000) return false;
   if (ppl <= 1.0f || ppl > 10000.0f) return false;
   if (strlen(tz) == 0 || strlen(tz) >= sizeof(config.tzInfo)) return false;
+  if (leakThreshold < 1.0f || leakThreshold > 100000.0f) return false;
 
   config.flowActiveLpm = flow;
   config.minIntervalLiters = minInterval;
   config.reportIntervalMs = reportMs;
+  config.leakProtectionEnabled = leakEnabled;
+  config.leakThresholdLiters = leakThreshold;
   for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
     if (count == expectedNew || i == 0) {
       int idx = startIndex + (i * 4);
@@ -129,7 +140,7 @@ bool saveConfigCsv() {
   if (!storageReadyFlag) return false;
   File file = SPIFFS.open(CONFIG_CSV_PATH, "w");
   if (!file) return false;
-  file.println("flow_active_lpm,min_interval_l,report_interval_ms,close1_start_hour,close1_start_min,close1_end_hour,close1_end_min,close2_start_hour,close2_start_min,close2_end_hour,close2_end_min,close3_start_hour,close3_start_min,close3_end_hour,close3_end_min,pulses_per_liter,tz_info");
+  file.println("flow_active_lpm,min_interval_l,report_interval_ms,close1_start_hour,close1_start_min,close1_end_hour,close1_end_min,close2_start_hour,close2_start_min,close2_end_hour,close2_end_min,close3_start_hour,close3_start_min,close3_end_hour,close3_end_min,pulses_per_liter,tz_info,leak_enabled,leak_threshold_l");
   file.print(config.flowActiveLpm, 3);
   file.print(",");
   file.print(config.minIntervalLiters, 3);
@@ -148,7 +159,11 @@ bool saveConfigCsv() {
   file.print(",");
   file.print(config.pulsesPerLiter, 2);
   file.print(",");
-  file.println(config.tzInfo);
+  file.print(config.tzInfo);
+  file.print(",");
+  file.print(config.leakProtectionEnabled ? 1 : 0);
+  file.print(",");
+  file.println(config.leakThresholdLiters, 2);
   file.close();
   return true;
 }

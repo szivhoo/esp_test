@@ -27,6 +27,8 @@ struct Config {
   float flowActiveLpm;
   float minIntervalLiters;
   uint32_t reportIntervalMs;
+  bool leakProtectionEnabled;
+  float leakThresholdLiters;
   int closeStartHour[BLOCKED_WINDOW_COUNT];
   int closeStartMin[BLOCKED_WINDOW_COUNT];
   int closeEndHour[BLOCKED_WINDOW_COUNT];

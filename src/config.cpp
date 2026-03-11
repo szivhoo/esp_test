@@ -10,11 +10,13 @@ static const float DEFAULT_PULSES_PER_LITER = 450.0f;
 static const float DEFAULT_FLOW_ACTIVE_LPM = 0.1f;
 static const float DEFAULT_MIN_INTERVAL_LITERS = 0.1f;
 static const uint32_t DEFAULT_REPORT_INTERVAL_MS = 10000;
+static const bool DEFAULT_LEAK_PROTECTION_ENABLED = true;
+static const float DEFAULT_LEAK_THRESHOLD_LITERS = 100.0f;
 static const int DEFAULT_CLOSE_START_HOUR[BLOCKED_WINDOW_COUNT] = {19, 0, 0};
 static const int DEFAULT_CLOSE_START_MIN[BLOCKED_WINDOW_COUNT] = {24, 0, 0};
 static const int DEFAULT_CLOSE_END_HOUR[BLOCKED_WINDOW_COUNT] = {6, 0, 0};
 static const int DEFAULT_CLOSE_END_MIN[BLOCKED_WINDOW_COUNT] = {0, 0, 0};
-static const char *DEFAULT_TZ_INFO = "UTC0";
+static const char *DEFAULT_TZ_INFO = "IST-2IDT,M3.4.4/26,M10.5.0";
 
 static Preferences prefs;
 
@@ -29,6 +31,8 @@ void loadConfig() {
     config.flowActiveLpm = prefs.getFloat("flow_lpm", DEFAULT_FLOW_ACTIVE_LPM);
     config.minIntervalLiters = prefs.getFloat("min_int_l", DEFAULT_MIN_INTERVAL_LITERS);
     config.reportIntervalMs = prefs.getUInt("report_ms", DEFAULT_REPORT_INTERVAL_MS);
+    config.leakProtectionEnabled = prefs.getBool("leak_en", DEFAULT_LEAK_PROTECTION_ENABLED);
+    config.leakThresholdLiters = prefs.getFloat("leak_l", DEFAULT_LEAK_THRESHOLD_LITERS);
     for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
       if (i == 0) {
         config.closeStartHour[i] = prefs.getInt("csh", DEFAULT_CLOSE_START_HOUR[i]);
@@ -55,6 +59,12 @@ void loadConfig() {
       saveConfigCsv();
     }
   }
+
+  if (strcmp(config.tzInfo, "UTC0") == 0) {
+    strncpy(config.tzInfo, DEFAULT_TZ_INFO, sizeof(config.tzInfo) - 1);
+    config.tzInfo[sizeof(config.tzInfo) - 1] = '\0';
+    saveConfig();
+  }
 }
 
 void saveConfig() {
@@ -62,6 +72,8 @@ void saveConfig() {
   prefs.putFloat("flow_lpm", config.flowActiveLpm);
   prefs.putFloat("min_int_l", config.minIntervalLiters);
   prefs.putUInt("report_ms", config.reportIntervalMs);
+  prefs.putBool("leak_en", config.leakProtectionEnabled);
+  prefs.putFloat("leak_l", config.leakThresholdLiters);
   for (int i = 0; i < BLOCKED_WINDOW_COUNT; i++) {
     if (i == 0) {
       prefs.putInt("csh", config.closeStartHour[i]);
