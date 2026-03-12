@@ -289,6 +289,10 @@ static void handleIntervalsCsv() {
   streamCsvFile(INTERVALS_CSV_PATH);
 }
 
+static void handleLeaksCsv() {
+  streamCsvFile(LEAKS_CSV_PATH);
+}
+
 static void handleSummaryJson() {
   String period = server.arg("period");
   period.toLowerCase();
@@ -343,6 +347,7 @@ void setupServer() {
   server.on("/api/config.csv", HTTP_GET, handleConfigCsv);
   server.on("/api/usage.csv", HTTP_GET, handleUsageCsv);
   server.on("/api/intervals.csv", HTTP_GET, handleIntervalsCsv);
+  server.on("/api/leaks.csv", HTTP_GET, handleLeaksCsv);
   server.on("/api/valve", HTTP_POST, handleValve);
   server.onNotFound(handleNotFound);
   server.begin();

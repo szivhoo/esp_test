@@ -12,9 +12,13 @@ bool saveConfigCsv();
 
 bool loadUsageFromCsv(int &lastYear, int &lastMonth, int &lastDay);
 bool appendDayUsageCsv(const DayUsage &day);
+bool appendLeakEventCsv(const struct tm *tmNow, const char *reason,
+                        float totalLiters, float dailyLiters, float continuousLiters,
+                        float thresholdLiters, bool valveClosed);
 
 String buildSummaryJson(const String &period, int limit);
 
 extern const char *CONFIG_CSV_PATH;
 extern const char *USAGE_CSV_PATH;
 extern const char *INTERVALS_CSV_PATH;
+extern const char *LEAKS_CSV_PATH;

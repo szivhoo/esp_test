@@ -376,6 +376,8 @@ void loop() {
           if (continuousLiters >= config.leakThresholdLiters) {
             leakTripped = true;
             closeValve();
+            appendLeakEventCsv(&tmNow, "FLOW_LIMIT", totalLiters, dailyLiters,
+                               continuousLiters, config.leakThresholdLiters, true);
             Serial.println("!!! LEAK DETECTED: FLOW LIMIT EXCEEDED - VALVE CLOSED !!!");
           }
         }

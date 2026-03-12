@@ -243,6 +243,33 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       text-transform: uppercase;
       letter-spacing: 0.6px;
     }
+    .leak-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .leak-row {
+      display: grid;
+      grid-template-columns: 140px 90px 110px 1fr;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      font-size: 12px;
+    }
+    .leak-row.header {
+      background: #7f1d1d;
+      border-color: #7f1d1d;
+      color: #fee2e2;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .leak-empty {
+      color: var(--muted);
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -366,7 +393,10 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
         <a class="link-btn" href="/api/usage.csv" target="_blank" rel="noopener">Usage CSV</a>
         <a class="link-btn" href="/api/intervals.csv" target="_blank" rel="noopener">Intervals CSV</a>
         <a class="link-btn" href="/api/config.csv" target="_blank" rel="noopener">Config CSV</a>
+        <a class="link-btn" href="/api/leaks.csv" target="_blank" rel="noopener">Leaks CSV</a>
       </div>
+      <div class="sub">Leak events</div>
+      <div id="leakHistory" class="leak-grid">Loading...</div>
       <div class="sub">Weekly totals</div>
       <div id="summaryWeeks" class="summary-grid">Loading...</div>
       <div class="sub" style="margin-top: 10px;">Monthly totals</div>
@@ -378,6 +408,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
   <script>
     let statusTimer = null;
     let reportTimer = null;
+    let leaksTimer = null;
     let currentInterval = 0;
 
     function resetTimers(intervalMs) {
@@ -386,8 +417,10 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       currentInterval = ms;
       if (statusTimer) clearInterval(statusTimer);
       if (reportTimer) clearInterval(reportTimer);
+      if (leaksTimer) clearInterval(leaksTimer);
       statusTimer = setInterval(loadStatus, 1000);
       reportTimer = setInterval(loadReport, ms);
+      leaksTimer = setInterval(loadLeaks, Math.max(5000, ms));
       document.querySelector('.footer').textContent = `Auto-refreshes every ${ms / 1000}s.`;
     }
 
@@ -489,6 +522,59 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       const month = await fetchJson('/api/summary.json?period=month&limit=12&t=' + Date.now());
       renderSummary('summaryMonths', month);
     }
+    function parseCsvLine(line) {
+      return line.split(',').map(v => v.trim());
+    }
+    function renderLeaks(rows) {
+      const host = document.getElementById('leakHistory');
+      if (!rows || rows.length === 0) {
+        host.innerHTML = '<div class="leak-empty">No leak events yet.</div>';
+        return;
+      }
+      let html = '';
+      html += `<div class="leak-row header">` +
+              `<div>Date</div><div>Time</div><div>Reason</div><div>Details</div>` +
+              `</div>`;
+      rows.forEach(r => {
+        html += `<div class="leak-row">` +
+                `<div>${r.date || '--'}</div>` +
+                `<div>${r.time || '--'}</div>` +
+                `<div>${r.reason || '--'}</div>` +
+                `<div>${r.details || '--'}</div>` +
+                `</div>`;
+      });
+      host.innerHTML = html;
+    }
+    async function loadLeaks() {
+      const host = document.getElementById('leakHistory');
+      try {
+        const res = await fetch('/api/leaks.csv?t=' + Date.now(), {cache: 'no-store'});
+        if (!res.ok) {
+          host.innerHTML = '<div class="leak-empty">No leak events yet.</div>';
+          return;
+        }
+        const text = await res.text();
+        const lines = text.trim().split('\n').filter(l => l.trim().length);
+        if (lines.length <= 1) {
+          host.innerHTML = '<div class="leak-empty">No leak events yet.</div>';
+          return;
+        }
+        const dataLines = lines.slice(1);
+        const parsed = dataLines.map(line => {
+          const cols = parseCsvLine(line);
+          return {
+            date: cols[1] || '',
+            time: cols[2] || '',
+            reason: cols[3] || '',
+            details: `Total ${Number(cols[4] || 0).toFixed(3)} L, Today ${Number(cols[5] || 0).toFixed(3)} L, Cont ${Number(cols[6] || 0).toFixed(3)} L, Th ${Number(cols[7] || 0).toFixed(2)} L, Valve ${cols[8] || '--'}`
+          };
+        });
+        const last = parsed.slice(-10).reverse();
+        renderLeaks(last);
+      } catch (_) {
+        host.innerHTML = '<div class="leak-empty">Leak history unavailable.</div>';
+      }
+    }
     async function loadConfig() {
       const c = await fetchJson('/api/config?t=' + Date.now());
       for (const key in c) {
@@ -541,6 +627,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
     loadReport();
     loadSummary();
     loadConfig();
+    loadLeaks();
   </script>
 </body>
 </html>

@@ -7,6 +7,7 @@
 const char *CONFIG_CSV_PATH = "/config.csv";
 const char *USAGE_CSV_PATH = "/usage.csv";
 const char *INTERVALS_CSV_PATH = "/intervals.csv";
+const char *LEAKS_CSV_PATH = "/leaks.csv";
 
 static bool storageReadyFlag = false;
 
@@ -308,6 +309,44 @@ bool appendDayUsageCsv(const DayUsage &day) {
                      (unsigned long)it.startSec, (unsigned long)it.endSec, it.liters);
   }
   intervals.close();
+  return true;
+}
+
+bool appendLeakEventCsv(const struct tm *tmNow, const char *reason,
+                        float totalLiters, float dailyLiters, float continuousLiters,
+                        float thresholdLiters, bool valveClosed) {
+  if (!storageReadyFlag) return false;
+  if (!reason || reason[0] == '\0') return false;
+
+  File file = SPIFFS.open(LEAKS_CSV_PATH, "a");
+  if (!file) return false;
+  if (file.size() == 0) {
+    file.println("timestamp,date,time,reason,total_liters,daily_liters,continuous_liters,threshold_liters,valve");
+  }
+
+  char dateBuf[16] = "";
+  char timeBuf[16] = "";
+  time_t ts = 0;
+  if (tmNow) {
+    struct tm copy = *tmNow;
+    ts = mktime(&copy);
+    snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+             tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday);
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d",
+             tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
+  }
+
+  file.printf("%ld,%s,%s,%s,%.3f,%.3f,%.3f,%.2f,%s\n",
+              (long)ts,
+              dateBuf,
+              timeBuf,
+              reason,
+              totalLiters,
+              dailyLiters,
+              continuousLiters,
+              thresholdLiters,
+              valveClosed ? "CLOSED" : "OPEN");
+  file.close();
   return true;
 }
 
