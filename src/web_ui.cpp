@@ -85,6 +85,10 @@ static String buildStatusJson() {
   json += (config.leakProtectionEnabled ? "true" : "false");
   json += ",\"leak_threshold_l\":";
   json += String(config.leakThresholdLiters, 2);
+  json += ",\"leak_progress_l\":";
+  json += String(continuousLiters, 3);
+  json += ",\"leak_tripped\":";
+  json += (leakTripped ? "true" : "false");
   json += ",\"close_start\":\"";
   appendTime(json, config.closeStartHour[0], config.closeStartMin[0]);
   json += "\"";

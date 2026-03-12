@@ -250,13 +250,15 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
     }
     .leak-row {
       display: grid;
-      grid-template-columns: 140px 90px 110px 1fr;
+      grid-template-columns: minmax(120px, 160px) minmax(80px, 110px);
       gap: 8px;
       padding: 8px 10px;
       border-radius: 10px;
       background: #fef2f2;
       border: 1px solid #fecaca;
       font-size: 12px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .leak-row.header {
       background: #7f1d1d;
@@ -269,6 +271,12 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
     .leak-empty {
       color: var(--muted);
       font-size: 12px;
+    }
+    @media (max-width: 640px) {
+      .leak-row,
+      .leak-row.header {
+        grid-template-columns: 1fr 1fr;
+      }
     }
   </style>
 </head>
@@ -533,14 +541,12 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       }
       let html = '';
       html += `<div class="leak-row header">` +
-              `<div>Date</div><div>Time</div><div>Reason</div><div>Details</div>` +
+              `<div>Date</div><div>Time</div>` +
               `</div>`;
       rows.forEach(r => {
         html += `<div class="leak-row">` +
                 `<div>${r.date || '--'}</div>` +
                 `<div>${r.time || '--'}</div>` +
-                `<div>${r.reason || '--'}</div>` +
-                `<div>${r.details || '--'}</div>` +
                 `</div>`;
       });
       host.innerHTML = html;
@@ -564,9 +570,7 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
           const cols = parseCsvLine(line);
           return {
             date: cols[1] || '',
-            time: cols[2] || '',
-            reason: cols[3] || '',
-            details: `Total ${Number(cols[4] || 0).toFixed(3)} L, Today ${Number(cols[5] || 0).toFixed(3)} L, Cont ${Number(cols[6] || 0).toFixed(3)} L, Th ${Number(cols[7] || 0).toFixed(2)} L, Valve ${cols[8] || '--'}`
+            time: cols[2] || ''
           };
         });
         const last = parsed.slice(-10).reverse();

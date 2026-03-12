@@ -47,6 +47,8 @@ extern float totalLiters;
 extern float dailyLiters;
 extern bool flowActive;
 extern int activeIntervalIndex;
+extern bool leakTripped;
+extern float continuousLiters;
 
 bool getLocalTimeSafe(struct tm &tmNow);
 bool isWithinClosedWindow(int hour, int minute);
