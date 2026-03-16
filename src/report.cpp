@@ -93,6 +93,7 @@ void printReportTo(Print &out) {
 
     bool printed = false;
     for (int j = 0; j < weekUsage[idx].intervalCount; j++) {
+      // Hide tiny intervals from reports; totals still include them.
       if (weekUsage[idx].intervals[j].liters < config.minIntervalLiters) {
         continue;
       }
@@ -180,6 +181,7 @@ String buildReportJson() {
 
     bool firstInterval = true;
     for (int j = 0; j < weekUsage[idx].intervalCount; j++) {
+      // Hide tiny intervals from reports; totals still include them.
       if (weekUsage[idx].intervals[j].liters < config.minIntervalLiters) {
         continue;
       }

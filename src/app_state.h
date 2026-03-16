@@ -3,7 +3,9 @@
 #include <Arduino.h>
 #include <time.h>
 
-constexpr int MAX_INTERVALS = 48;
+// Maximum number of flow intervals stored per day; extra intervals are dropped.
+// This caps memory usage but can make day totals exceed the sum of displayed rows.
+constexpr int MAX_INTERVALS = 256;
 constexpr int BLOCKED_WINDOW_COUNT = 3;
 
 struct DayInterval {
@@ -25,6 +27,8 @@ struct DayUsage {
 
 struct Config {
   float flowActiveLpm;
+  // Minimum liters for an interval to be included in reports/JSON output.
+  // Intervals below this are still counted in daily totals but are hidden.
   float minIntervalLiters;
   uint32_t reportIntervalMs;
   bool leakProtectionEnabled;
