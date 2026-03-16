@@ -222,15 +222,25 @@ bool loadUsageFromCsv(int &lastYear, int &lastMonth, int &lastDay) {
     day.totalSeconds = seconds;
     day.totalLiters = liters;
 
-    if (count < 7) {
-      temp[count] = day;
-      count++;
-    } else {
-      for (int i = 1; i < 7; i++) {
-        temp[i - 1] = temp[i];
+    bool replaced = false;
+    for (int i = 0; i < count; i++) {
+      if (temp[i].year == year && temp[i].month == month && temp[i].day == dayNum) {
+        temp[i] = day;  // keep the latest entry for this date
+        replaced = true;
+        break;
       }
-      temp[6] = day;
-      count = 7;
+    }
+    if (!replaced) {
+      if (count < 7) {
+        temp[count] = day;
+        count++;
+      } else {
+        for (int i = 1; i < 7; i++) {
+          temp[i - 1] = temp[i];
+        }
+        temp[6] = day;
+        count = 7;
+      }
     }
   }
   file.close();
@@ -310,6 +320,112 @@ bool appendDayUsageCsv(const DayUsage &day) {
   }
   intervals.close();
   return true;
+}
+
+static void formatDateBuf(const DayUsage &day, char *buf, size_t size) {
+  snprintf(buf, size, "%04d-%02d-%02d", day.year, day.month, day.day);
+}
+
+static bool rewriteUsageCsvWithDay(const DayUsage &day) {
+  if (!storageReadyFlag) return false;
+  if (day.year < 0) return false;
+
+  char dateBuf[16];
+  formatDateBuf(day, dateBuf, sizeof(dateBuf));
+
+  File out = SPIFFS.open("/usage.tmp", "w");
+  if (!out) return false;
+
+  bool wroteHeader = false;
+  File in = SPIFFS.open(USAGE_CSV_PATH, "r");
+  if (in) {
+    char line[128];
+    while (in.available()) {
+      size_t len = in.readBytesUntil('\n', line, sizeof(line) - 1);
+      line[len] = '\0';
+      if (len == 0) continue;
+      if (strncmp(line, "date", 4) == 0) {
+        if (!wroteHeader) {
+          out.println("date,wday,total_seconds,total_liters");
+          wroteHeader = true;
+        }
+        continue;
+      }
+      if (strncmp(line, dateBuf, 10) == 0 && line[10] == ',') {
+        continue;
+      }
+      out.println(line);
+    }
+    in.close();
+  }
+
+  if (!wroteHeader) {
+    out.println("date,wday,total_seconds,total_liters");
+  }
+  out.printf("%04d-%02d-%02d,%d,%lu,%.3f\n",
+             day.year, day.month, day.day, day.wday,
+             (unsigned long)day.totalSeconds, day.totalLiters);
+  out.close();
+
+  SPIFFS.remove(USAGE_CSV_PATH);
+  return SPIFFS.rename("/usage.tmp", USAGE_CSV_PATH);
+}
+
+static bool rewriteIntervalsCsvWithDay(const DayUsage &day) {
+  if (!storageReadyFlag) return false;
+  if (day.year < 0) return false;
+
+  char dateBuf[16];
+  formatDateBuf(day, dateBuf, sizeof(dateBuf));
+
+  File out = SPIFFS.open("/intervals.tmp", "w");
+  if (!out) return false;
+
+  bool wroteHeader = false;
+  File in = SPIFFS.open(INTERVALS_CSV_PATH, "r");
+  if (in) {
+    char line[128];
+    while (in.available()) {
+      size_t len = in.readBytesUntil('\n', line, sizeof(line) - 1);
+      line[len] = '\0';
+      if (len == 0) continue;
+      if (strncmp(line, "date", 4) == 0) {
+        if (!wroteHeader) {
+          out.println("date,wday,start_sec,end_sec,liters");
+          wroteHeader = true;
+        }
+        continue;
+      }
+      if (strncmp(line, dateBuf, 10) == 0 && line[10] == ',') {
+        continue;
+      }
+      out.println(line);
+    }
+    in.close();
+  }
+
+  if (!wroteHeader) {
+    out.println("date,wday,start_sec,end_sec,liters");
+  }
+  for (int i = 0; i < day.intervalCount; i++) {
+    const DayInterval &it = day.intervals[i];
+    if (it.liters <= 0.0f) continue;
+    out.printf("%04d-%02d-%02d,%d,%lu,%lu,%.3f\n",
+               day.year, day.month, day.day, day.wday,
+               (unsigned long)it.startSec, (unsigned long)it.endSec, it.liters);
+  }
+  out.close();
+
+  SPIFFS.remove(INTERVALS_CSV_PATH);
+  return SPIFFS.rename("/intervals.tmp", INTERVALS_CSV_PATH);
+}
+
+bool snapshotDayUsageCsv(const DayUsage &day) {
+  if (!storageReadyFlag) return false;
+  if (day.year < 0) return false;
+  bool okUsage = rewriteUsageCsvWithDay(day);
+  bool okIntervals = rewriteIntervalsCsvWithDay(day);
+  return okUsage && okIntervals;
 }
 
 bool appendLeakEventCsv(const struct tm *tmNow, const char *reason,

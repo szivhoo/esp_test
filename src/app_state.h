@@ -5,7 +5,7 @@
 
 // Maximum number of flow intervals stored per day; extra intervals are dropped.
 // This caps memory usage but can make day totals exceed the sum of displayed rows.
-constexpr int MAX_INTERVALS = 256;
+constexpr int MAX_INTERVALS = 48;
 constexpr int BLOCKED_WINDOW_COUNT = 3;
 
 struct DayInterval {
@@ -53,6 +53,9 @@ extern bool flowActive;
 extern int activeIntervalIndex;
 extern bool leakTripped;
 extern float continuousLiters;
+extern int currentYear;
+extern int currentYday;
+extern bool skipPersistOnNextRollover;
 
 bool getLocalTimeSafe(struct tm &tmNow);
 bool isWithinClosedWindow(int hour, int minute);

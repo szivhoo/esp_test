@@ -23,6 +23,11 @@ uint32_t lastReportMs = 0;
 uint32_t lastFlowLogMs = 0;
 uint32_t lastTimeSyncMs = 0;
 uint32_t lastWifiRetryMs = 0;
+uint32_t lastSnapshotMs = 0;
+uint32_t lastSnapshotSeconds = 0;
+float lastSnapshotLiters = 0.0f;
+uint8_t lastSnapshotIntervals = 0;
+static const uint32_t SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
 float flowRateLpm = 0.0f;
 float totalLiters = 0.0f;
 float dailyLiters = 0.0f;
@@ -418,6 +423,20 @@ void loop() {
         }
       }
       lastInClosedWindow = inClosedWindow;
+    }
+
+    if (timeValid && (nowMs - lastSnapshotMs >= SNAPSHOT_INTERVAL_MS)) {
+      const DayUsage &day = weekUsage[weekIndex];
+      if (day.year >= 0 &&
+          (day.totalSeconds != lastSnapshotSeconds ||
+           day.totalLiters != lastSnapshotLiters ||
+           day.intervalCount != lastSnapshotIntervals)) {
+        snapshotDayUsageCsv(day);
+        lastSnapshotSeconds = day.totalSeconds;
+        lastSnapshotLiters = day.totalLiters;
+        lastSnapshotIntervals = day.intervalCount;
+      }
+      lastSnapshotMs = nowMs;
     }
   }
 

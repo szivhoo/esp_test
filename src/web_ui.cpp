@@ -11,6 +11,9 @@
 #include "web_ui_html.h"
 
 static WebServer server(80);
+static File uploadFile;
+static String uploadTarget;
+static bool uploadOk = false;
 
 class StringPrint : public Print {
 public:
@@ -263,6 +266,90 @@ static void handleReportJson() {
   server.send(200, "application/json", buildReportJson());
 }
 
+static void handleReportDayJson() {
+  String date = server.arg("date");
+  if (date.length() != 10) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  server.send(200, "application/json", buildReportDayJson(date));
+}
+
+static bool reloadUsageFromCsv() {
+  int lastYear = 0;
+  int lastMonth = 0;
+  int lastDay = 0;
+  bool usageLoaded = loadUsageFromCsv(lastYear, lastMonth, lastDay);
+  if (timeValid && usageLoaded) {
+    struct tm tmLast = {};
+    tmLast.tm_year = lastYear - 1900;
+    tmLast.tm_mon = lastMonth - 1;
+    tmLast.tm_mday = lastDay;
+    tmLast.tm_hour = 12;
+    tmLast.tm_isdst = -1;
+    time_t lastTs = mktime(&tmLast);
+    localtime_r(&lastTs, &tmLast);
+    currentYear = tmLast.tm_year;
+    currentYday = tmLast.tm_yday;
+    skipPersistOnNextRollover = true;
+  }
+  return usageLoaded;
+}
+
+static const char *uploadPathForType(const String &type) {
+  if (type == "usage") return USAGE_CSV_PATH;
+  if (type == "intervals") return INTERVALS_CSV_PATH;
+  if (type == "leaks") return LEAKS_CSV_PATH;
+  return nullptr;
+}
+
+static void handleUploadBody() {
+  HTTPUpload &upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    uploadOk = false;
+    uploadTarget = "";
+    String type = server.arg("type");
+    const char *path = uploadPathForType(type);
+    if (!path || !storageReady()) {
+      return;
+    }
+    uploadTarget = String(path);
+    SPIFFS.remove(path);
+    uploadFile = SPIFFS.open(path, "w");
+    uploadOk = uploadFile;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (uploadOk && uploadFile) {
+      uploadFile.write(upload.buf, upload.currentSize);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (uploadFile) {
+      uploadFile.close();
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    if (uploadFile) {
+      uploadFile.close();
+    }
+    if (uploadTarget.length()) {
+      SPIFFS.remove(uploadTarget);
+    }
+    uploadOk = false;
+  }
+}
+
+static void handleUploadDone() {
+  if (!uploadOk || uploadTarget.isEmpty()) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  String type = server.arg("type");
+  bool reloaded = false;
+  if (type == "usage" || type == "intervals") {
+    reloaded = reloadUsageFromCsv();
+  }
+  server.send(200, "application/json",
+              reloaded ? "{\"ok\":true,\"reloaded\":true}" : "{\"ok\":true}");
+}
+
 static void handleConfigGet() {
   server.send(200, "application/json", buildConfigJson());
 }
@@ -345,6 +432,8 @@ void setupServer() {
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/report", HTTP_GET, handleReport);
   server.on("/api/report.json", HTTP_GET, handleReportJson);
+  server.on("/api/report_day.json", HTTP_GET, handleReportDayJson);
+  server.on("/api/upload", HTTP_POST, handleUploadDone, handleUploadBody);
   server.on("/api/summary.json", HTTP_GET, handleSummaryJson);
   server.on("/api/config", HTTP_GET, handleConfigGet);
   server.on("/api/config", HTTP_POST, handleConfigPost);

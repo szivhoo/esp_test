@@ -38,6 +38,20 @@ static void printFloatFixed(Print &out, float value, int width, int decimals) {
   out.print(buf);
 }
 
+static const char *DAY_NAMES[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+static int wdayFromDate(int year, int month, int day) {
+  struct tm tmDay = {};
+  tmDay.tm_year = year - 1900;
+  tmDay.tm_mon = month - 1;
+  tmDay.tm_mday = day;
+  tmDay.tm_isdst = -1;
+  if (mktime(&tmDay) == (time_t)-1) {
+    return 0;
+  }
+  return tmDay.tm_wday;
+}
+
 void computeWeekTotals(uint32_t &seconds, float &liters) {
   seconds = 0;
   liters = 0.0f;
@@ -55,8 +69,6 @@ void printReportTo(Print &out) {
     out.println("Time not synced. Report unavailable.");
     return;
   }
-
-  static const char *DAY_NAMES[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
   uint32_t weekTotal = 0;
   float weekLiters = 0.0f;
   computeWeekTotals(weekTotal, weekLiters);
@@ -76,7 +88,8 @@ void printReportTo(Print &out) {
     }
 
     out.print("[");
-    out.print(DAY_NAMES[weekUsage[idx].wday]);
+    int wday = wdayFromDate(weekUsage[idx].year, weekUsage[idx].month, weekUsage[idx].day);
+    out.print(DAY_NAMES[wday]);
     out.print("] ");
     out.print(weekUsage[idx].year);
     out.print("-");
@@ -137,7 +150,7 @@ static void formatDuration(char *buf, size_t size, uint32_t seconds) {
 
 String buildReportJson() {
   String json;
-  json.reserve(4096);
+  json.reserve(2048);
 
   uint32_t weekSeconds = 0;
   float weekLiters = 0.0f;
@@ -150,7 +163,6 @@ String buildReportJson() {
   json += String(weekLiters, 3);
   json += ",\"days\":[";
 
-  static const char *DAY_NAMES[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
   bool firstDay = true;
   for (int i = 6; i >= 0; i--) {
     int idx = (weekIndex - i + 7) % 7;
@@ -163,8 +175,9 @@ String buildReportJson() {
     firstDay = false;
 
     json += "{";
+    int wday = wdayFromDate(weekUsage[idx].year, weekUsage[idx].month, weekUsage[idx].day);
     json += "\"wday\":\"";
-    json += DAY_NAMES[weekUsage[idx].wday];
+    json += DAY_NAMES[wday];
     json += "\",\"date\":\"";
     json += String(weekUsage[idx].year);
     json += "-";
@@ -177,39 +190,93 @@ String buildReportJson() {
     json += String(weekUsage[idx].totalSeconds);
     json += ",\"total_l\":";
     json += String(weekUsage[idx].totalLiters, 3);
-    json += ",\"intervals\":[";
 
-    bool firstInterval = true;
+    int visibleIntervals = 0;
     for (int j = 0; j < weekUsage[idx].intervalCount; j++) {
       // Hide tiny intervals from reports; totals still include them.
       if (weekUsage[idx].intervals[j].liters < config.minIntervalLiters) {
         continue;
       }
-      if (!firstInterval) json += ",";
-      firstInterval = false;
-      uint32_t startSec = weekUsage[idx].intervals[j].startSec;
-      uint32_t endSec = weekUsage[idx].intervals[j].endSec;
-      uint32_t duration = (endSec >= startSec) ? (endSec - startSec) : 0;
-      char fromBuf[8];
-      char toBuf[8];
-      char durBuf[12];
-      formatTimeHM(fromBuf, sizeof(fromBuf), startSec);
-      formatTimeHM(toBuf, sizeof(toBuf), endSec);
-      formatDuration(durBuf, sizeof(durBuf), duration);
-      json += "{";
-      json += "\"from\":\"";
-      json += fromBuf;
-      json += "\",\"to\":\"";
-      json += toBuf;
-      json += "\",\"dur\":\"";
-      json += durBuf;
-      json += "\",\"liters\":";
-      json += String(weekUsage[idx].intervals[j].liters, 3);
-      json += "}";
+      visibleIntervals++;
     }
-    json += "]}";
+    json += ",\"intervals_count\":";
+    json += String(visibleIntervals);
+    json += "}";
   }
 
+  json += "]}";
+  return json;
+}
+
+String buildReportDayJson(const String &date) {
+  String json;
+  json.reserve(4096);
+
+  const DayUsage *day = nullptr;
+
+  for (int i = 6; i >= 0; i--) {
+    int idx = (weekIndex - i + 7) % 7;
+    if (weekUsage[idx].year < 0) {
+      continue;
+    }
+    String dayDate = String(weekUsage[idx].year);
+    dayDate += "-";
+    if (weekUsage[idx].month < 10) dayDate += "0";
+    dayDate += String(weekUsage[idx].month);
+    dayDate += "-";
+    if (weekUsage[idx].day < 10) dayDate += "0";
+    dayDate += String(weekUsage[idx].day);
+    if (dayDate == date) {
+      day = &weekUsage[idx];
+      break;
+    }
+  }
+
+  if (!day) {
+    return "{\"ok\":false}";
+  }
+
+  json += "{";
+  int wday = wdayFromDate(day->year, day->month, day->day);
+  json += "\"ok\":true";
+  json += ",\"wday\":\"";
+  json += DAY_NAMES[wday];
+  json += "\",\"date\":\"";
+  json += date;
+  json += "\",\"total_sec\":";
+  json += String(day->totalSeconds);
+  json += ",\"total_l\":";
+  json += String(day->totalLiters, 3);
+  json += ",\"intervals\":[";
+
+  bool firstInterval = true;
+  for (int j = 0; j < day->intervalCount; j++) {
+    // Hide tiny intervals from reports; totals still include them.
+    if (day->intervals[j].liters < config.minIntervalLiters) {
+      continue;
+    }
+    if (!firstInterval) json += ",";
+    firstInterval = false;
+    uint32_t startSec = day->intervals[j].startSec;
+    uint32_t endSec = day->intervals[j].endSec;
+    uint32_t duration = (endSec >= startSec) ? (endSec - startSec) : 0;
+    char fromBuf[8];
+    char toBuf[8];
+    char durBuf[12];
+    formatTimeHM(fromBuf, sizeof(fromBuf), startSec);
+    formatTimeHM(toBuf, sizeof(toBuf), endSec);
+    formatDuration(durBuf, sizeof(durBuf), duration);
+    json += "{";
+    json += "\"from\":\"";
+    json += fromBuf;
+    json += "\",\"to\":\"";
+    json += toBuf;
+    json += "\",\"dur\":\"";
+    json += durBuf;
+    json += "\",\"liters\":";
+    json += String(day->intervals[j].liters, 3);
+    json += "}";
+  }
   json += "]}";
   return json;
 }

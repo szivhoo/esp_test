@@ -12,6 +12,7 @@ bool saveConfigCsv();
 
 bool loadUsageFromCsv(int &lastYear, int &lastMonth, int &lastDay);
 bool appendDayUsageCsv(const DayUsage &day);
+bool snapshotDayUsageCsv(const DayUsage &day);
 bool appendLeakEventCsv(const struct tm *tmNow, const char *reason,
                         float totalLiters, float dailyLiters, float continuousLiters,
                         float thresholdLiters, bool valveClosed);

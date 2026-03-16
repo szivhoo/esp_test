@@ -171,6 +171,11 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       margin-bottom: 8px;
       gap: 8px;
     }
+    .day-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .day-title {
       font-weight: 700;
       font-size: 15px;
@@ -179,6 +184,26 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       color: #1f2937;
       font-weight: 600;
       font-size: 13px;
+    }
+    .day-toggle {
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      color: #111827;
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .day-toggle[disabled] {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .day-details {
+      display: none;
+      margin-top: 6px;
+    }
+    .day-details.open {
+      display: block;
     }
     .interval-row {
       display: grid;
@@ -203,6 +228,19 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       margin-top: 10px;
       font-size: 12px;
       color: #0f172a;
+    }
+    .upload-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .upload-row select {
+      width: auto;
+      min-width: 140px;
+    }
+    .upload-row input[type="file"] {
+      flex: 1;
     }
     .footer {
       margin-top: 8px;
@@ -364,6 +402,19 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
           <div id="configMsg" class="config-msg"></div>
         </div>
       </form>
+      <h2 style="margin-top: 16px;">Maintenance</h2>
+      <form id="uploadForm">
+        <div class="upload-row">
+          <select id="uploadType" name="type" required>
+            <option value="leaks">Leaks CSV</option>
+            <option value="usage">Usage CSV</option>
+            <option value="intervals">Intervals CSV</option>
+          </select>
+          <input id="uploadFile" name="file" type="file" accept=".csv" required>
+          <button class="btn" type="submit">Upload</button>
+        </div>
+        <div id="uploadMsg" class="config-msg"></div>
+      </form>
     </div>
 
     <div class="grid" style="margin-top: 16px;">
@@ -416,6 +467,8 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
   <script>
     let statusTimer = null;
     let reportTimer = null;
+    const openDayKeys = new Set();
+    const dayCache = new Map();
     let leaksTimer = null;
     let currentInterval = 0;
 
@@ -463,6 +516,51 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
       const s = String(seconds % 60).padStart(2, '0');
       return `${h}:${m}:${s}`;
     }
+    async function fetchDayDetails(date, details, btn) {
+      if (dayCache.has(date)) {
+        details.innerHTML = dayCache.get(date);
+        details.dataset.loaded = '1';
+        details.classList.add('open');
+        btn.textContent = 'Hide';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      try {
+        const res = await fetch('/api/report_day.json?date=' + encodeURIComponent(date), {cache: 'no-store'});
+        const day = await res.json();
+        let dhtml = '';
+        if (!day || !day.ok) {
+          dhtml = `<div class="sub">No intervals</div>`;
+        } else if (day.intervals && day.intervals.length) {
+          dhtml = `<div class="interval-row interval-header">` +
+                  `<div>From</div><div>To</div><div>Dur</div><div>Liters</div>` +
+                  `</div>`;
+          day.intervals.forEach(it => {
+            dhtml += `<div class="interval-row">` +
+                     `<div>${it.from}</div>` +
+                     `<div>${it.to}</div>` +
+                     `<div>${it.dur}</div>` +
+                     `<div>${Number(it.liters || 0).toFixed(3)} L</div>` +
+                     `</div>`;
+          });
+        } else {
+          dhtml = `<div class="sub">No intervals</div>`;
+        }
+        dayCache.set(date, dhtml);
+        details.innerHTML = dhtml;
+        details.dataset.loaded = '1';
+        details.classList.add('open');
+        btn.textContent = 'Hide';
+      } catch (err) {
+        details.innerHTML = `<div class="sub">Failed to load intervals</div>`;
+        details.classList.add('open');
+        btn.textContent = 'Retry';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     function renderReport(data) {
       const host = document.getElementById('report');
       if (!data || !Array.isArray(data.days)) {
@@ -474,32 +572,66 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
               `<div>Week Total</div>` +
               `<div>${formatDuration(data.week_total_sec || 0)} | ${Number(data.week_total_l || 0).toFixed(3)} L</div>` +
               `</div>`;
-      data.days.forEach(day => {
+      data.days.forEach((day, idx) => {
         const totalDur = formatDuration(day.total_sec || 0);
         const totalL = Number(day.total_l || 0).toFixed(3);
+        const intervalsCount = Number(day.intervals_count || 0);
+        const dayKey = `${day.date}-${idx}`;
+        const filteredNote = (intervalsCount === 0 && Number(day.total_l || 0) > 0)
+          ? `<div class="sub">Intervals hidden by minIntervalLiters</div>`
+          : '';
         html += `<div class="day-card">` +
                 `<div class="day-header">` +
                 `<div class="day-title">${day.wday} ${day.date}</div>` +
+                `<div class="day-meta">` +
                 `<div class="day-total">${totalDur} | ${totalL} L</div>` +
-                `</div>`;
-        if (day.intervals && day.intervals.length) {
-          html += `<div class="interval-row interval-header">` +
-                  `<div>From</div><div>To</div><div>Dur</div><div>Liters</div>` +
-                  `</div>`;
-          day.intervals.forEach(it => {
-            html += `<div class="interval-row">` +
-                    `<div>${it.from}</div>` +
-                    `<div>${it.to}</div>` +
-                    `<div>${it.dur}</div>` +
-                    `<div>${Number(it.liters || 0).toFixed(3)} L</div>` +
-                    `</div>`;
-          });
-        } else {
-          html += `<div class="sub">No intervals</div>`;
-        }
+                `<button class="day-toggle" data-key="${dayKey}" data-date="${day.date}" data-count="${intervalsCount}">Details (${intervalsCount})</button>` +
+                `</div>` +
+                `</div>` +
+                `${filteredNote}` +
+                `<div class="day-details" data-key="${dayKey}" data-date="${day.date}"></div>`;
         html += `</div>`;
       });
       host.innerHTML = html;
+      host.onclick = async (event) => {
+        const btn = event.target.closest('.day-toggle');
+        if (!btn) return;
+        const key = btn.getAttribute('data-key');
+        const date = btn.getAttribute('data-date');
+        const card = btn.closest('.day-card');
+        const details = card ? card.querySelector(`.day-details[data-key="${key}"]`) : null;
+        if (!details) return;
+        const count = btn.getAttribute('data-count') || '0';
+        if (details.classList.contains('open')) {
+          details.classList.remove('open');
+          btn.textContent = `Details (${count})`;
+          openDayKeys.delete(key);
+          return;
+        }
+
+        // Accordion behavior: close any other open day.
+        openDayKeys.forEach((openKey) => {
+          if (openKey === key) return;
+          const openBtn = host.querySelector(`.day-toggle[data-key="${openKey}"]`);
+          const openDetails = host.querySelector(`.day-details[data-key="${openKey}"]`);
+          if (openDetails) openDetails.classList.remove('open');
+          if (openBtn) {
+            const openCount = openBtn.getAttribute('data-count') || '0';
+            openBtn.textContent = `Details (${openCount})`;
+          }
+        });
+        openDayKeys.clear();
+        openDayKeys.add(key);
+        await fetchDayDetails(date, details, btn);
+      };
+
+      openDayKeys.forEach(async (key) => {
+        const btn = host.querySelector(`.day-toggle[data-key="${key}"]`);
+        const details = host.querySelector(`.day-details[data-key="${key}"]`);
+        if (!btn || !details) return;
+        const date = btn.getAttribute('data-date');
+        await fetchDayDetails(date, details, btn);
+      });
     }
     async function loadReport() {
       const res = await fetch('/api/report.json?t=' + Date.now(), {cache: 'no-store'});
@@ -622,6 +754,30 @@ extern const char DASHBOARD_HTML[] PROGMEM = R"HTML(
         await loadReport();
       } else {
         msg.textContent = 'Save failed. Check values.';
+      }
+    });
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('uploadMsg');
+      msg.textContent = 'Uploading...';
+      const type = document.getElementById('uploadType').value;
+      const file = document.getElementById('uploadFile').files[0];
+      if (!file) {
+        msg.textContent = 'Pick a file first.';
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file, file.name);
+      const res = await fetch('/api/upload?type=' + encodeURIComponent(type), {
+        method: 'POST',
+        body: form
+      });
+      if (res.ok) {
+        msg.textContent = 'Uploaded.';
+        await loadReport();
+        await loadLeaks();
+      } else {
+        msg.textContent = 'Upload failed.';
       }
     });
     document.getElementById('configToggle').addEventListener('click', () => {
